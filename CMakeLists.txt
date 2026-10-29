@@ -19,12 +19,17 @@ endif()
 include_directories(
     include
     vendor/monocypher
+    vendor/cjson
 )
 
-# Core library
+# Core library sources
 set(WEX_CORE_SOURCES
     vendor/monocypher/monocypher.c
+    vendor/monocypher/monocypher-ed25519.c
+    vendor/cjson/cJSON.c
     src/crypto/wex_crypto.c
+    src/models/wex_models.c
+    src/net/wex_ws_server.c
 )
 
 add_library(wex_core STATIC ${WEX_CORE_SOURCES})
@@ -39,3 +44,7 @@ enable_testing()
 add_executable(test_crypto tests/test_crypto.c)
 target_link_libraries(test_crypto wex_core)
 add_test(NAME test_crypto COMMAND test_crypto)
+
+add_executable(test_models tests/test_models.c)
+target_link_libraries(test_models wex_core)
+add_test(NAME test_models COMMAND test_models)

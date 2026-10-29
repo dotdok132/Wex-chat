@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wex-Chat | Sovereign P2P</title>
+  <style>
+    :root {
+      --bg-darkest: #1e1f22;
+      --bg-darker: #2b2d31;
+      --bg-dark: #313338;
+      --bg-light: #383a40;
+      --accent: #5865f2;
+      --accent-hover: #4752c4;
+      --text-normal: #dbdee1;
+      --text-muted: #949ba4;
+      --green: #23a55a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; }
+    body { display: flex; height: 100vh; background: var(--bg-dark); color: var(--text-normal); overflow: hidden; }
+    
+    /* Sidebar: Guilds / Spaces */
+    #guilds-bar { width: 72px; background: var(--bg-darkest); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 8px; }
+    .guild-icon { width: 48px; height: 48px; border-radius: 50%; background: var(--bg-darker); display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; transition: all 0.2s; color: var(--text-normal); text-decoration: none; user-select: none; }
+    .guild-icon:hover, .guild-icon.active { border-radius: 16px; background: var(--accent); color: #fff; }
+    .guild-icon.add-btn { background: var(--bg-light); color: var(--green); font-size: 24px; }
+    .guild-icon.add-btn:hover { background: var(--green); color: #fff; }
+    
+    /* Channels Sidebar */
+    #channels-bar { width: 240px; background: var(--bg-darker); display: flex; flex-direction: column; }
+    .server-header { height: 48px; border-bottom: 1px solid var(--bg-darkest); display: flex; align-items: center; padding: 0 16px; font-weight: bold; font-size: 15px; }
+    .channel-list { flex: 1; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+    .channel-item { display: flex; align-items: center; padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: 14px; }
+    .channel-item:hover { background: var(--bg-light); color: var(--text-normal); }
+    .channel-item.active { background: var(--bg-light); color: #fff; font-weight: 500; }
+    .channel-item::before { content: '#'; margin-right: 6px; font-size: 16px; color: var(--text-muted); }
+    
+    /* User Footer */
+    .user-footer { height: 52px; background: var(--bg-darkest); display: flex; align-items: center; padding: 0 8px; gap: 8px; }
+    .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; }
+    .user-info { flex: 1; overflow: hidden; }
+    .user-name { font-size: 13px; font-weight: bold; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    .user-status { font-size: 11px; color: var(--green); }
+    
+    /* Chat Area */
+    #chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg-dark); }
+    .chat-header { height: 48px; border-bottom: 1px solid var(--bg-darkest); display: flex; align-items: center; padding: 0 16px; font-weight: bold; gap: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+    .chat-header span { color: var(--text-muted); font-weight: normal; }
+    .invite-btn { margin-left: auto; background: var(--accent); border: none; padding: 6px 12px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; font-weight: bold; }
+    .invite-btn:hover { background: var(--accent-hover); }
+    
+    .messages-feed { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+    .msg-group { display: flex; gap: 12px; }
+    .msg-avatar { width: 40px; height: 40px; border-radius: 50%; background: #e67e22; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 15px; flex-shrink: 0; }
+    .msg-body { flex: 1; }
+    .msg-meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+    .msg-author { font-weight: bold; font-size: 14px; color: #fff; }
+    .msg-time { font-size: 11px; color: var(--text-muted); }
+    .msg-content { font-size: 14px; line-height: 1.4; color: var(--text-normal); word-break: break-word; }
+    .verified-badge { background: #23a55a33; color: #23a55a; border-radius: 3px; font-size: 10px; padding: 1px 4px; font-weight: bold; }
+    
+    .input-box { padding: 16px; background: var(--bg-dark); }
+    .input-wrapper { background: var(--bg-light); border-radius: 8px; padding: 10px 16px; display: flex; align-items: center; }
+    .input-wrapper input { flex: 1; background: transparent; border: none; outline: none; color: #fff; font-size: 14px; }
+    .input-wrapper input::placeholder { color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <div id="guilds-bar">
+    <div class="guild-icon active" id="space-avatar">W</div>
+    <div class="guild-icon add-btn" title="Создать новое сообщество" onclick="createNewSpace()">+</div>
+  </div>
+  
+  <div id="channels-bar">
+    <div class="server-header" id="server-title">Wex Realm</div>
+    <div class="channel-list" id="channel-container">
+      <div class="channel-item active">general</div>
+      <div class="channel-item">dev</div>
+    </div>
+    <div class="user-footer">
+      <div class="user-avatar" id="my-avatar">U</div>
+      <div class="user-info">
+        <div class="user-name" id="my-nickname">Connecting...</div>
+        <div class="user-status">P2P Sovereign</div>
+      </div>
+    </div>
+  </div>
+  
+  <div id="chat-area">
+    <div class="chat-header">
+      <span style="color:var(--text-muted)">#</span>
+      <span id="active-channel-name" style="color:#fff; font-weight:bold">general</span>
+      <span id="active-channel-topic">| Sovereign бессерверный P2P канал</span>
+      <button class="invite-btn" onclick="copyInvite()">Ссылка-приглашение</button>
+    </div>
+    <div class="messages-feed" id="messages"></div>
+    <div class="input-box">
+      <div class="input-wrapper">
+        <input type="text" id="msg-input" placeholder="Написать в #general (Enter для отправки)..." autocomplete="off">
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let ws;
+    let currentSpaceId = '';
+    let currentChannel = 'general';
+    let myNick = 'User';
+
+    function connectWS() {
+      const loc = window.location;
+      const wsUrl = (loc.protocol === 'https:' ? 'wss://' : 'ws://') + (loc.host || '127.0.0.1:9000');
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('[WS] Connected to Wex Daemon');
+        ws.send(JSON.stringify({ action: 'get_status' }));
+      };
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'status') {
+          myNick = data.identity.nickname;
+          document.getElementById('my-nickname').innerText = myNick;
+          document.getElementById('my-avatar').innerText = myNick.charAt(0).toUpperCase();
+          if (data.spaces && data.spaces.length > 0) {
+            const sp = data.spaces[0];
+            currentSpaceId = sp.id;
+            document.getElementById('server-title').innerText = sp.name;
+            document.getElementById('space-avatar').innerText = sp.name.charAt(0).toUpperCase();
+            renderChannels(sp.channels);
+          }
+          if (data.history) {
+            document.getElementById('messages').innerHTML = '';
+            data.history.forEach(appendMessage);
+          }
+        } else if (data.type === 'message') {
+          appendMessage(data);
+        }
+      };
+      
+      ws.onclose = () => {
+        document.getElementById('my-nickname').innerText = 'Переподключение...';
+        setTimeout(connectWS, 1500);
+      };
+    }
+
+    function renderChannels(channels) {
+      const container = document.getElementById('channel-container');
+      container.innerHTML = '';
+      channels.forEach(ch => {
+        const div = document.createElement('div');
+        div.className = 'channel-item' + (ch === currentChannel ? ' active' : '');
+        div.innerText = ch;
+        div.onclick = () => switchChannel(ch, div);
+        container.appendChild(div);
+      });
+    }
+
+    function switchChannel(ch, elem) {
+      currentChannel = ch;
+      document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
+      elem.classList.add('active');
+      document.getElementById('active-channel-name').innerText = ch;
+      document.getElementById('msg-input').placeholder = `Написать в #${ch}...`;
+    }
+
+    function appendMessage(msg) {
+      const feed = document.getElementById('messages');
+      const group = document.createElement('div');
+      group.className = 'msg-group';
+      
+      const timeStr = new Date(msg.timestamp_ms || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      const initial = (msg.author || '?').charAt(0).toUpperCase();
+      
+      group.innerHTML = `
+        <div class="msg-avatar">${initial}</div>
+        <div class="msg-body">
+          <div class="msg-meta">
+            <span class="msg-author">${msg.author}</span>
+            <span class="verified-badge">Ed25519 Verified</span>
+            <span class="msg-time">${timeStr}</span>
+          </div>
+          <div class="msg-content">${escapeHtml(msg.content)}</div>
+        </div>
+      `;
+      feed.appendChild(group);
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+      const d = document.createElement('div');
+      d.innerText = text;
+      return d.innerHTML;
+    }
+
+    function copyInvite() {
+      const link = `wex://join/${currentSpaceId}?peer=127.0.0.1:9000`;
+      navigator.clipboard.writeText(link);
+      alert('Ссылка-приглашение скопирована в буфер:\n' + link);
+    }
+
+    function createNewSpace() {
+      const name = prompt('Введите имя нового сообщества:');
+      if (name && ws) {
+        ws.send(JSON.stringify({ action: 'create_space', name: name }));
+      }
+    }
+
+    document.getElementById('msg-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.value.trim() !== '') {
+        const text = e.target.value.trim();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            action: 'send_message',
+            space_id: currentSpaceId,
+            channel: currentChannel,
+            text: text
+          }));
+          e.target.value = '';
+        }
+      }
+    });
+
+    connectWS();
+  </script>
+</body>
+</html>
