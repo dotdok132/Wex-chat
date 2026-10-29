@@ -2,6 +2,7 @@
 #define WEX_P2P_H
 
 #include "wex_models.h"
+#include "wex_dht.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -13,16 +14,17 @@
 
 /* Packet Types */
 typedef enum {
-    WEX_PKT_HELLO       = 0x01, /* Node introduces identity & nickname */
-    WEX_PKT_WELCOME     = 0x02, /* Node acknowledges connection & shares info */
-    WEX_PKT_PING        = 0x03, /* Keepalive / NAT hole punching */
-    WEX_PKT_PONG        = 0x04, /* Keepalive response */
-    WEX_PKT_JOIN_SPACE  = 0x05, /* Subscribe to space/channel swarm */
-    WEX_PKT_SYNC_REQ    = 0x06, /* Request recent chat history from peers */
-    WEX_PKT_SYNC_RESP   = 0x07, /* Swarm history synchronization response */
-    WEX_PKT_CHAT_MSG    = 0x10, /* Real encrypted & signed chat message */
-    WEX_PKT_STORE_SHARD = 0x20, /* Quas Store-and-Forward shard for offline peer */
-    WEX_PKT_PULL_SHARDS = 0x21  /* Offline peer querying for stored shards */
+    WEX_PKT_HELLO         = 0x01, /* Node introduces identity & nickname */
+    WEX_PKT_WELCOME       = 0x02, /* Node acknowledges connection & shares info */
+    WEX_PKT_PING          = 0x03, /* Keepalive / NAT hole punching */
+    WEX_PKT_PONG          = 0x04, /* Keepalive response */
+    WEX_PKT_JOIN_SPACE    = 0x05, /* Subscribe to space/channel swarm */
+    WEX_PKT_SYNC_REQ      = 0x06, /* Request recent chat history from peers */
+    WEX_PKT_SYNC_RESP     = 0x07, /* Swarm history synchronization response */
+    WEX_PKT_CHAT_MSG      = 0x10, /* Direct encrypted & signed chat message */
+    WEX_PKT_STORE_SHARD   = 0x20, /* Quas Store-and-Forward shard for offline peer */
+    WEX_PKT_PULL_SHARDS   = 0x21, /* Offline peer querying for stored shards */
+    WEX_PKT_OVERLAY_RELAY = 0x30  /* Transit overlay multi-hop relay */
 } wex_pkt_type_t;
 
 /* Binary header on the wire */
@@ -62,13 +64,16 @@ typedef struct {
     uint8_t active_space_id[32];
     char active_channel[WEX_NAME_LEN];
 
+    /* Kademlia DHT routing table */
+    wex_dht_table_t dht;
+
     wex_on_msg_fn msg_cb;
     wex_on_peer_fn peer_cb;
     wex_on_sync_req_fn sync_cb;
     void *user_data;
 } wex_p2p_node_t;
 
-/* Initialize P2P node */
+/* Initialize P2P node and DHT table */
 int wex_p2p_init(wex_p2p_node_t *node, wex_identity_t *ident, int udp_port);
 
 /* Set event callbacks */
@@ -85,6 +90,9 @@ void wex_p2p_request_sync(wex_p2p_node_t *node, const struct sockaddr_in *target
 
 /* Broadcast a chat message to all connected peers in the space */
 int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg);
+
+/* Transit overlay routing: forwards a message toward destination ID through next-hop in DHT */
+int wex_p2p_relay_msg(wex_p2p_node_t *node, const uint8_t dst_id[32], const wex_chat_msg_t *msg);
 
 /* Process incoming UDP datagrams */
 int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms);

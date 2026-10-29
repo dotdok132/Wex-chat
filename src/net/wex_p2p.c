@@ -34,6 +34,9 @@ int wex_p2p_init(wex_p2p_node_t *node, wex_identity_t *ident, int udp_port) {
     node->udp_fd = -1;
     strncpy(node->active_channel, "general", sizeof(node->active_channel) - 1);
 
+    /* Initialize Kademlia DHT routing table */
+    wex_dht_init(&node->dht, ident->sign_pk);
+
     node->udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (node->udp_fd < 0) {
         perror("socket(SOCK_DGRAM)");
@@ -216,6 +219,89 @@ int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg) {
     return sent_count;
 }
 
+int wex_p2p_relay_msg(wex_p2p_node_t *node, const uint8_t dst_id[32], const wex_chat_msg_t *msg) {
+    if (!node || node->udp_fd < 0 || !dst_id || !msg) return -1;
+
+    uint8_t buffer[WEX_MAX_UDP_PAYLOAD];
+    wex_dht_relay_hdr_t *relay_hdr = (wex_dht_relay_hdr_t *)buffer;
+    relay_hdr->magic = htonl(WEX_P2P_MAGIC);
+    relay_hdr->type = WEX_PKT_OVERLAY_RELAY;
+    memcpy(relay_hdr->src_id, node->identity->sign_pk, 32);
+    memcpy(relay_hdr->dst_id, dst_id, 32);
+    memcpy(relay_hdr->topic_id, msg->space_id, 32);
+    relay_hdr->hops_left = WEX_DHT_MAX_HOPS;
+
+    uint8_t *payload = buffer + sizeof(wex_dht_relay_hdr_t);
+    size_t inner_len = serialize_chat_msg(msg, payload, sizeof(buffer) - sizeof(wex_dht_relay_hdr_t));
+    if (inner_len == 0) return -1;
+
+    relay_hdr->payload_len = htons((uint16_t)inner_len);
+    size_t total_len = sizeof(wex_dht_relay_hdr_t) + inner_len;
+
+    wex_dht_contact_t next_hop;
+    if (!wex_dht_next_hop(&node->dht, dst_id, &next_hop)) {
+        if (wex_dht_find_closest(&node->dht, dst_id, &next_hop, 1) == 0) {
+            return -2;
+        }
+    }
+
+    ssize_t s = sendto(node->udp_fd, buffer, total_len, 0,
+                       (struct sockaddr *)&next_hop.addr, sizeof(next_hop.addr));
+    return (s == (ssize_t)total_len) ? 0 : -1;
+}
+
+static void parse_and_deliver_chat_msg(wex_p2p_node_t *node, const uint8_t *payload, size_t payload_len, const uint8_t sender_pk[32], const uint8_t space_id[32]) {
+    if (payload_len < 64 + sizeof(uint64_t) + 2) return;
+
+    wex_chat_msg_t msg;
+    memset(&msg, 0, sizeof(msg));
+    memcpy(msg.space_id, space_id, 32);
+    memcpy(msg.author_pk, sender_pk, 32);
+
+    size_t off = 0;
+
+    /* Channel */
+    const char *ch = (const char *)(payload + off);
+    size_t ch_len = strnlen(ch, payload_len - off) + 1;
+    if (ch_len > WEX_NAME_LEN) ch_len = WEX_NAME_LEN;
+    strncpy(msg.channel, ch, ch_len - 1);
+    off += ch_len;
+    if (off >= payload_len) return;
+
+    /* Author */
+    const char *auth = (const char *)(payload + off);
+    size_t auth_len = strnlen(auth, payload_len - off) + 1;
+    if (auth_len > WEX_NAME_LEN) auth_len = WEX_NAME_LEN;
+    strncpy(msg.author, auth, auth_len - 1);
+    off += auth_len;
+    if (off + sizeof(uint64_t) > payload_len) return;
+
+    /* Timestamp */
+    memcpy(&msg.timestamp_ms, payload + off, sizeof(uint64_t));
+    off += sizeof(uint64_t);
+    if (off >= payload_len) return;
+
+    /* Content */
+    const char *content_str = (const char *)(payload + off);
+    size_t cont_len = strnlen(content_str, payload_len - off) + 1;
+    if (cont_len > WEX_MAX_MSG_LEN) cont_len = WEX_MAX_MSG_LEN;
+    strncpy(msg.content, content_str, cont_len - 1);
+    off += cont_len;
+    if (off + 64 > payload_len) return;
+
+    /* Signature */
+    memcpy(msg.signature, payload + off, 64);
+
+    /* Cryptographic verification of author's Ed25519 signature */
+    if (wex_chat_msg_verify(&msg)) {
+        if (node->msg_cb) {
+            node->msg_cb(&msg, node->user_data);
+        }
+    } else {
+        fprintf(stderr, "[!] Warning: Dropped forged/corrupted P2P message from %s\n", msg.author);
+    }
+}
+
 int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
     if (!node || node->udp_fd < 0) return -1;
 
@@ -236,17 +322,53 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
                          (struct sockaddr *)&src_addr, &addr_len);
     if (n < (ssize_t)sizeof(wex_pkt_hdr_t)) return 0;
 
-    const wex_pkt_hdr_t *hdr = (const wex_pkt_hdr_t *)buffer;
-    if (ntohl(hdr->magic) != WEX_P2P_MAGIC) {
+    /* Check magic */
+    uint32_t magic = ntohl(*(uint32_t *)buffer);
+    if (magic != WEX_P2P_MAGIC) {
         return 0;
     }
 
+    uint8_t pkt_type = buffer[4];
+
+    /* Handle Overlay Relay */
+    if (pkt_type == WEX_PKT_OVERLAY_RELAY) {
+        if (n < (ssize_t)sizeof(wex_dht_relay_hdr_t)) return 0;
+        wex_dht_relay_hdr_t *relay_hdr = (wex_dht_relay_hdr_t *)buffer;
+        uint16_t inner_len = ntohs(relay_hdr->payload_len);
+        if ((size_t)n < sizeof(wex_dht_relay_hdr_t) + inner_len) return 0;
+
+        /* Update DHT contact for the intermediate sender */
+        wex_dht_update_contact(&node->dht, relay_hdr->src_id, &src_addr, get_time_ms());
+
+        /* Check if we are destination */
+        if (memcmp(relay_hdr->dst_id, node->identity->sign_pk, 32) == 0) {
+            const wex_pkt_hdr_t *inner_hdr = (const wex_pkt_hdr_t *)(buffer + sizeof(wex_dht_relay_hdr_t));
+            uint16_t msg_payload_len = ntohs(inner_hdr->payload_len);
+            const uint8_t *msg_payload = (const uint8_t *)inner_hdr + sizeof(wex_pkt_hdr_t);
+            parse_and_deliver_chat_msg(node, msg_payload, msg_payload_len, inner_hdr->sender_pk, inner_hdr->space_id);
+        } else if (relay_hdr->hops_left > 1) {
+            /* Forward transitively */
+            relay_hdr->hops_left--;
+            wex_dht_contact_t next_hop;
+            if (wex_dht_next_hop(&node->dht, relay_hdr->dst_id, &next_hop)) {
+                sendto(node->udp_fd, buffer, (size_t)n, 0,
+                       (struct sockaddr *)&next_hop.addr, sizeof(next_hop.addr));
+            }
+        }
+        return 1;
+    }
+
+    const wex_pkt_hdr_t *hdr = (const wex_pkt_hdr_t *)buffer;
     uint16_t payload_len = ntohs(hdr->payload_len);
     if ((size_t)n < sizeof(wex_pkt_hdr_t) + payload_len) {
         return 0;
     }
 
     const uint8_t *payload = buffer + sizeof(wex_pkt_hdr_t);
+
+    /* Update Kademlia DHT routing table and topic providers */
+    wex_dht_update_contact(&node->dht, hdr->sender_pk, &src_addr, get_time_ms());
+    wex_dht_announce_topic(&node->dht, hdr->space_id, hdr->sender_pk, &src_addr, 3600000ULL);
 
     switch (hdr->type) {
         case WEX_PKT_HELLO: {
@@ -290,7 +412,6 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
                 if (node->peer_cb) {
                     node->peer_cb(p, true, node->user_data);
                 }
-                /* Immediately request swarm history synchronization! */
                 if (!p->synced) {
                     wex_p2p_request_sync(node, &p->addr);
                     p->synced = true;
@@ -300,7 +421,6 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
         }
 
         case WEX_PKT_SYNC_REQ: {
-            /* Peer is asking for recent chat history */
             char target_ch[WEX_NAME_LEN] = "general";
             if (payload_len > 0) {
                 size_t cpy = (payload_len < sizeof(target_ch) - 1) ? payload_len : sizeof(target_ch) - 1;
@@ -337,55 +457,7 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
         }
 
         case WEX_PKT_CHAT_MSG: {
-            if (payload_len < 64 + sizeof(uint64_t) + 2) return 0;
-
-            wex_chat_msg_t msg;
-            memset(&msg, 0, sizeof(msg));
-            memcpy(msg.space_id, hdr->space_id, 32);
-            memcpy(msg.author_pk, hdr->sender_pk, 32);
-
-            size_t off = 0;
-
-            /* Channel */
-            const char *ch = (const char *)(payload + off);
-            size_t ch_len = strnlen(ch, payload_len - off) + 1;
-            if (ch_len > WEX_NAME_LEN) ch_len = WEX_NAME_LEN;
-            strncpy(msg.channel, ch, ch_len - 1);
-            off += ch_len;
-            if (off >= payload_len) return 0;
-
-            /* Author */
-            const char *auth = (const char *)(payload + off);
-            size_t auth_len = strnlen(auth, payload_len - off) + 1;
-            if (auth_len > WEX_NAME_LEN) auth_len = WEX_NAME_LEN;
-            strncpy(msg.author, auth, auth_len - 1);
-            off += auth_len;
-            if (off + sizeof(uint64_t) > payload_len) return 0;
-
-            /* Timestamp */
-            memcpy(&msg.timestamp_ms, payload + off, sizeof(uint64_t));
-            off += sizeof(uint64_t);
-            if (off >= payload_len) return 0;
-
-            /* Content */
-            const char *content_str = (const char *)(payload + off);
-            size_t cont_len = strnlen(content_str, payload_len - off) + 1;
-            if (cont_len > WEX_MAX_MSG_LEN) cont_len = WEX_MAX_MSG_LEN;
-            strncpy(msg.content, content_str, cont_len - 1);
-            off += cont_len;
-            if (off + 64 > payload_len) return 0;
-
-            /* Signature */
-            memcpy(msg.signature, payload + off, 64);
-
-            /* Cryptographic verification of author's Ed25519 signature */
-            if (wex_chat_msg_verify(&msg)) {
-                if (node->msg_cb) {
-                    node->msg_cb(&msg, node->user_data);
-                }
-            } else {
-                fprintf(stderr, "[!] Warning: Dropped forged/corrupted P2P message from %s\n", msg.author);
-            }
+            parse_and_deliver_chat_msg(node, payload, payload_len, hdr->sender_pk, hdr->space_id);
             break;
         }
 

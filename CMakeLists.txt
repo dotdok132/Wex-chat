@@ -32,6 +32,7 @@ set(WEX_CORE_SOURCES
     src/net/wex_ws_server.c
     src/net/wex_p2p.c
     src/storage/wex_store.c
+    src/dht/wex_dht.c
 )
 
 add_library(wex_core STATIC ${WEX_CORE_SOURCES})
@@ -54,3 +55,7 @@ add_test(NAME test_models COMMAND test_models)
 add_executable(test_p2p_swarm tests/test_p2p_swarm.c)
 target_link_libraries(test_p2p_swarm wex_core)
 add_test(NAME test_p2p_swarm COMMAND test_p2p_swarm)
+
+add_executable(test_dht tests/test_dht.c)
+target_link_libraries(test_dht wex_core)
+add_test(NAME test_dht COMMAND test_dht)
