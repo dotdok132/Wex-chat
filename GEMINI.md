@@ -1,8 +1,17 @@
 # Wex-Chat: Developer & Agent Guidelines
 
 ## 1. Project Overview
-**Wex-Chat** is an anti-surveillance, privacy-first, decentralized peer-to-peer (P2P) messaging platform.
-It is built as an uncompromising, sovereign alternative to centralized walled gardens (like Discord), requiring **zero KYC, no phone numbers, and no central servers**.
+**Wex-Chat** is an everyday, privacy-first, sovereign alternative to Discord.
+It solves real developer and user frustration: **zero KYC, no phone numbers, no age-verification passport scans, no corporate account bans, and no central servers**.
+
+### Product Philosophy (Discord-like, NOT Darknet Paranoia):
+- **Everyday Usability First**: Fast, lightweight, responsive, and intuitive (like Discord).
+- **Not for evading state intelligence services**: Avoid cumbersome over-engineering (no CPU-burning Proof-of-Work on normal messages, no artificial packet jitter, no crippling 7KB limits).
+- **Core Entities**:
+  - Identity: Cryptographic keypair + human nickname and avatar (no phone/email).
+  - Spaces/Guilds: Decentralized communities with channels (text, general, dev, etc.).
+  - Real-time messaging: Instant delivery via P2P/direct routes, encrypted via ChaCha20-Poly1305.
+  - Client API: WebSockets / IPC JSON-RPC for a beautiful modern web or desktop UI.
 
 ### Triad Taxonomy (Quas / Wex / Exort):
 - **Exort (Power & Crypto)**: Cryptographic engine, keys (X25519/Ed25519), ChaCha20-Poly1305 encryption, and Shamir's Secret Sharing (SSS).
