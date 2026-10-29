@@ -35,6 +35,11 @@
     .channel-item.active { background: var(--bg-light); color: #fff; font-weight: 500; }
     .channel-item::before { content: '#'; margin-right: 6px; font-size: 16px; color: var(--text-muted); }
     
+    .section-title { font-size: 11px; font-weight: bold; color: var(--text-muted); padding: 8px 8px 4px 8px; text-transform: uppercase; }
+    .peers-list { padding: 4px 8px; display: flex; flex-direction: column; gap: 4px; }
+    .peer-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-normal); }
+    .peer-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+
     /* User Footer */
     .user-footer { height: 52px; background: var(--bg-darkest); display: flex; align-items: center; padding: 0 8px; gap: 8px; }
     .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; }
@@ -46,9 +51,12 @@
     #chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg-dark); }
     .chat-header { height: 48px; border-bottom: 1px solid var(--bg-darkest); display: flex; align-items: center; padding: 0 16px; font-weight: bold; gap: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
     .chat-header span { color: var(--text-muted); font-weight: normal; }
-    .invite-btn { margin-left: auto; background: var(--accent); border: none; padding: 6px 12px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; font-weight: bold; }
-    .invite-btn:hover { background: var(--accent-hover); }
-    
+    .header-btns { margin-left: auto; display: flex; gap: 8px; }
+    .btn { background: var(--accent); border: none; padding: 6px 12px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; font-weight: bold; }
+    .btn:hover { background: var(--accent-hover); }
+    .btn.secondary { background: var(--bg-light); color: var(--text-normal); }
+    .btn.secondary:hover { background: #4e5058; color: #fff; }
+
     .messages-feed { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
     .msg-group { display: flex; gap: 12px; }
     .msg-avatar { width: 40px; height: 40px; border-radius: 50%; background: #e67e22; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 15px; flex-shrink: 0; }
@@ -73,15 +81,22 @@
   
   <div id="channels-bar">
     <div class="server-header" id="server-title">Wex Realm</div>
+    <div class="section-title">Каналы</div>
     <div class="channel-list" id="channel-container">
       <div class="channel-item active">general</div>
       <div class="channel-item">dev</div>
     </div>
+    
+    <div class="section-title">P2P Соседи (UDP)</div>
+    <div class="peers-list" id="peer-container">
+      <div style="font-size:12px; color:var(--text-muted); padding: 4px;">Поиск пиров в сети...</div>
+    </div>
+
     <div class="user-footer">
       <div class="user-avatar" id="my-avatar">U</div>
       <div class="user-info">
         <div class="user-name" id="my-nickname">Connecting...</div>
-        <div class="user-status">P2P Sovereign</div>
+        <div class="user-status" id="my-node-status">P2P UDP Ready</div>
       </div>
     </div>
   </div>
@@ -90,8 +105,11 @@
     <div class="chat-header">
       <span style="color:var(--text-muted)">#</span>
       <span id="active-channel-name" style="color:#fff; font-weight:bold">general</span>
-      <span id="active-channel-topic">| Sovereign бессерверный P2P канал</span>
-      <button class="invite-btn" onclick="copyInvite()">Ссылка-приглашение</button>
+      <span id="active-channel-topic">| Sovereign P2P Swarm</span>
+      <div class="header-btns">
+        <button class="btn secondary" onclick="connectToPeerPrompt()">+ Добавить пир</button>
+        <button class="btn" onclick="copyInvite()">Пригласить друга</button>
+      </div>
     </div>
     <div class="messages-feed" id="messages"></div>
     <div class="input-box">
@@ -106,6 +124,7 @@
     let currentSpaceId = '';
     let currentChannel = 'general';
     let myNick = 'User';
+    let myUdpPort = 9001;
 
     function connectWS() {
       const loc = window.location;
@@ -121,8 +140,11 @@
         const data = JSON.parse(event.data);
         if (data.type === 'status') {
           myNick = data.identity.nickname;
+          myUdpPort = data.identity.udp_port || 9001;
           document.getElementById('my-nickname').innerText = myNick;
           document.getElementById('my-avatar').innerText = myNick.charAt(0).toUpperCase();
+          document.getElementById('my-node-status').innerText = `UDP :${myUdpPort} | P2P`;
+          
           if (data.spaces && data.spaces.length > 0) {
             const sp = data.spaces[0];
             currentSpaceId = sp.id;
@@ -130,10 +152,15 @@
             document.getElementById('space-avatar').innerText = sp.name.charAt(0).toUpperCase();
             renderChannels(sp.channels);
           }
+          if (data.peers) {
+            renderPeers(data.peers);
+          }
           if (data.history) {
             document.getElementById('messages').innerHTML = '';
             data.history.forEach(appendMessage);
           }
+        } else if (data.type === 'peer_joined') {
+          ws.send(JSON.stringify({ action: 'get_status' }));
         } else if (data.type === 'message') {
           appendMessage(data);
         }
@@ -154,6 +181,21 @@
         div.innerText = ch;
         div.onclick = () => switchChannel(ch, div);
         container.appendChild(div);
+      });
+    }
+
+    function renderPeers(peers) {
+      const container = document.getElementById('peer-container');
+      container.innerHTML = '';
+      if (!peers || peers.length === 0) {
+        container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding:4px;">Нет подключенных пиров</div>';
+        return;
+      }
+      peers.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'peer-item';
+        item.innerHTML = `<span class="peer-dot"></span><span>${p.nickname}</span> <span style="font-size:10px;color:var(--text-muted);">(${p.ip}:${p.port})</span>`;
+        container.appendChild(item);
       });
     }
 
@@ -195,9 +237,23 @@
     }
 
     function copyInvite() {
-      const link = `wex://join/${currentSpaceId}?peer=127.0.0.1:9000`;
+      const link = `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}`;
       navigator.clipboard.writeText(link);
-      alert('Ссылка-приглашение скопирована в буфер:\n' + link);
+      alert('Инвайт скопирован! Друг может подключиться к вашему UDP порту:\n' + link);
+    }
+
+    function connectToPeerPrompt() {
+      const target = prompt('Введите IP:Port пира (например, 127.0.0.1:9002):');
+      if (target && target.includes(':')) {
+        const parts = target.split(':');
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            action: 'connect_peer',
+            ip: parts[0].trim(),
+            port: parseInt(parts[1].trim(), 10)
+          }));
+        }
+      }
     }
 
     function createNewSpace() {

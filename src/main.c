@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <string.h>
 #include <unistd.h>
 
 static volatile int keep_running = 1;
@@ -12,15 +13,26 @@ static void sig_handler(int sig) {
 }
 
 int main(int argc, char **argv) {
-    int port = WEX_DEFAULT_WS_PORT;
+    int ws_port = WEX_DEFAULT_WS_PORT;
+    int udp_port = WEX_DEFAULT_UDP_PORT;
     const char *nickname = "dotdok";
+    const char *peer_target = NULL;
 
     if (argc >= 2) {
-        port = atoi(argv[1]);
-        if (port <= 0) port = WEX_DEFAULT_WS_PORT;
+        ws_port = atoi(argv[1]);
+        if (ws_port <= 0) ws_port = WEX_DEFAULT_WS_PORT;
     }
     if (argc >= 3) {
-        nickname = argv[2];
+        udp_port = atoi(argv[2]);
+        if (udp_port <= 0) udp_port = ws_port + 1;
+    } else {
+        udp_port = ws_port + 1;
+    }
+    if (argc >= 4) {
+        nickname = argv[3];
+    }
+    if (argc >= 5) {
+        peer_target = argv[4];
     }
 
     signal(SIGINT, sig_handler);
@@ -32,7 +44,7 @@ int main(int argc, char **argv) {
     printf("[*] User nickname: %s\n", nickname);
 
     wex_server_t server;
-    if (wex_server_init(&server, port, nickname) != 0) {
+    if (wex_server_init(&server, ws_port, udp_port, nickname) != 0) {
         fprintf(stderr, "[-] Failed to initialize Wex server\n");
         return 1;
     }
@@ -42,11 +54,25 @@ int main(int argc, char **argv) {
     printf("[*] Ed25519 Public ID: %s\n", pk_hex);
 
     if (wex_server_start(&server) != 0) {
-        fprintf(stderr, "[-] Failed to start WebSocket daemon on port %d\n", port);
+        fprintf(stderr, "[-] Failed to start daemon\n");
         return 1;
     }
 
-    printf("[+] Open your browser at: http://127.0.0.1:%d\n", port);
+    /* If peer argument provided (e.g. 127.0.0.1:9001), connect immediately */
+    if (peer_target) {
+        char ip_buf[128];
+        strncpy(ip_buf, peer_target, sizeof(ip_buf) - 1);
+        ip_buf[sizeof(ip_buf) - 1] = '\0';
+        char *colon = strchr(ip_buf, ':');
+        if (colon) {
+            *colon = '\0';
+            int peer_p = atoi(colon + 1);
+            printf("[*] Auto-connecting to initial P2P peer %s:%d...\n", ip_buf, peer_p);
+            wex_server_connect_peer(&server, ip_buf, peer_p);
+        }
+    }
+
+    printf("[+] Open your browser at: http://127.0.0.1:%d\n", ws_port);
     printf("[*] Daemon running. Press Ctrl+C to stop.\n");
 
     while (keep_running) {
