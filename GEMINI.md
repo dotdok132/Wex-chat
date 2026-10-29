@@ -4,12 +4,17 @@
 **Wex-Chat** is an anti-surveillance, privacy-first, decentralized peer-to-peer (P2P) messaging platform.
 It is built as an uncompromising, sovereign alternative to centralized walled gardens (like Discord), requiring **zero KYC, no phone numbers, and no central servers**.
 
-### Key Architectural Pillars:
-- **P2P Topology**: DHT (Kademlia-inspired) for node discovery and distributed routing.
-- **Store-and-Forward**: Intermediate nodes hold encrypted packet shards for offline recipients with TTL and PoW (Proof-of-Work) to mitigate spam.
-- **Multi-Path Shamir's Secret Sharing (SSS)**: Every message encryption key is split into $(k, n)$ threshold shares. Each share is routed across distinct peer paths, neutralizing single-node interception and traffic correlation.
-- **Traffic Analysis Resistance**: Fixed-size packets (uniform padding, e.g., 1024 bytes) to prevent packet-size fingerprinting.
-- **High Performance & Lean Runtime**: Pure C99 core daemon, non-blocking asynchronous event loop, zero runtime overhead.
+### Triad Taxonomy (Quas / Wex / Exort):
+- **Exort (Power & Crypto)**: Cryptographic engine, keys (X25519/Ed25519), ChaCha20-Poly1305 encryption, and Shamir's Secret Sharing (SSS).
+- **Wex (Speed & Flow)**: Network layer, P2P DHT routing, multi-path dispatching, uniform fixed-size frame transport.
+- **Quas (Stasis & Retention)**: Store-and-Forward engine, offline message caching, TTL management, PoW spam defense.
+
+---
+
+## 2. Interaction Protocol with Developer
+- **Rule of Consultation**: BEFORE implementing any major module or making architectural decisions, ALWAYS ask the developer how they want it to be done.
+- Provide simple, high-level choices with trade-offs so the developer doesn't need to know low-level details to make informed product decisions.
+- Maintain a proactive, pair-programming mindset: propose solutions, explain pros/cons, and execute only upon developer confirmation.
 
 ---
 
