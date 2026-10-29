@@ -161,6 +161,20 @@ static void on_p2p_peer_event(const wex_peer_t *peer, bool joined, void *user_da
     cJSON_Delete(out);
 }
 
+static size_t on_p2p_sync_request(const uint8_t space_id[32], const char *channel, wex_chat_msg_t out_msgs[], size_t max_msgs, void *user_data) {
+    wex_server_t *srv = (wex_server_t *)user_data;
+    if (!srv || !channel) return 0;
+
+    size_t count = 0;
+    for (size_t i = 0; i < srv->history_count && count < max_msgs; i++) {
+        if (memcmp(srv->history[i].space_id, space_id, 32) == 0 &&
+            strcmp(srv->history[i].channel, channel) == 0) {
+            out_msgs[count++] = srv->history[i];
+        }
+    }
+    return count;
+}
+
 int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *nickname) {
     if (!srv) return -1;
     memset(srv, 0, sizeof(*srv));
@@ -187,6 +201,7 @@ int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *ni
     }
     memcpy(srv->p2p.active_space_id, srv->spaces[0].space_id, 32);
     wex_p2p_set_callbacks(&srv->p2p, on_p2p_incoming_msg, on_p2p_peer_event, srv);
+    wex_p2p_set_sync_callback(&srv->p2p, on_p2p_sync_request);
 
     return 0;
 }

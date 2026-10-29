@@ -151,6 +151,66 @@ static void test_quas_store_and_forward(void) {
     TEST_PASS("Quas Store-and-Forward: Proof-of-Work anti-spam + offline message retention & delivery");
 }
 
+typedef struct {
+    wex_chat_msg_t history[16];
+    size_t count;
+} mock_history_t;
+
+static size_t mock_sync_cb(const uint8_t space_id[32], const char *channel, wex_chat_msg_t out_msgs[], size_t max_msgs, void *user_data) {
+    (void)space_id;
+    (void)channel;
+    mock_history_t *h = (mock_history_t *)user_data;
+    size_t n = (h->count < max_msgs) ? h->count : max_msgs;
+    for (size_t i = 0; i < n; i++) {
+        out_msgs[i] = h->history[i];
+    }
+    return n;
+}
+
+static void test_history_sync_on_join(void) {
+    wex_identity_t alice_id, bob_id;
+    assert(wex_identity_init(&alice_id, NULL, "Alice") == 0);
+    assert(wex_identity_init(&bob_id, NULL, "Bob") == 0);
+
+    wex_p2p_node_t alice_node, bob_node;
+    assert(wex_p2p_init(&alice_node, &alice_id, 20001) == 0);
+    assert(wex_p2p_init(&bob_node, &bob_id, 20002) == 0);
+
+    mock_history_t alice_hist;
+    alice_hist.count = 2;
+    memset(&alice_hist.history[0], 0, sizeof(wex_chat_msg_t));
+    strncpy(alice_hist.history[0].channel, "general", 31);
+    strncpy(alice_hist.history[0].content, "Past message 1 from yesterday", WEX_MAX_MSG_LEN - 1);
+    assert(wex_chat_msg_sign(&alice_hist.history[0], &alice_id) == 0);
+
+    memset(&alice_hist.history[1], 0, sizeof(wex_chat_msg_t));
+    strncpy(alice_hist.history[1].channel, "general", 31);
+    strncpy(alice_hist.history[1].content, "Past message 2 from this morning", WEX_MAX_MSG_LEN - 1);
+    assert(wex_chat_msg_sign(&alice_hist.history[1], &alice_id) == 0);
+
+    wex_p2p_set_sync_callback(&alice_node, mock_sync_cb);
+    alice_node.user_data = &alice_hist;
+
+    test_sink_t bob_sink = {0};
+    wex_p2p_set_callbacks(&bob_node, on_test_msg, NULL, &bob_sink);
+
+    /* Bob connects to Alice */
+    assert(wex_p2p_connect(&bob_node, "127.0.0.1", 20001) == 0);
+
+    /* Poll network for handshakes and auto-sync */
+    for (int t = 0; t < 20; t++) {
+        wex_p2p_poll(&alice_node, 10);
+        wex_p2p_poll(&bob_node, 10);
+        usleep(5000);
+    }
+
+    assert(bob_sink.received_count == 2);
+    TEST_PASS("Automatic Swarm History Sync: newly joined peer pulls past messages from online peers");
+
+    wex_p2p_close(&alice_node);
+    wex_p2p_close(&bob_node);
+}
+
 int main(void) {
     printf("====================================================\n");
     printf("  Running Wex True P2P UDP Swarm & Quas Test Suite  \n");
@@ -158,6 +218,7 @@ int main(void) {
 
     test_p2p_three_node_swarm();
     test_quas_store_and_forward();
+    test_history_sync_on_join();
 
     printf("====================================================\n");
     printf("  ALL REAL P2P & QUAS TESTS PASSED WITH 100%% SUCCESS!\n");

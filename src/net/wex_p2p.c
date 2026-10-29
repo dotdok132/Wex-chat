@@ -32,6 +32,7 @@ int wex_p2p_init(wex_p2p_node_t *node, wex_identity_t *ident, int udp_port) {
     node->identity = ident;
     node->port = udp_port;
     node->udp_fd = -1;
+    strncpy(node->active_channel, "general", sizeof(node->active_channel) - 1);
 
     node->udp_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (node->udp_fd < 0) {
@@ -69,8 +70,30 @@ void wex_p2p_set_callbacks(wex_p2p_node_t *node, wex_on_msg_fn msg_cb, wex_on_pe
     node->user_data = user_data;
 }
 
+void wex_p2p_set_sync_callback(wex_p2p_node_t *node, wex_on_sync_req_fn sync_cb) {
+    if (!node) return;
+    node->sync_cb = sync_cb;
+}
+
+void wex_p2p_request_sync(wex_p2p_node_t *node, const struct sockaddr_in *target_addr) {
+    if (!node || node->udp_fd < 0 || !target_addr) return;
+
+    uint8_t buffer[256];
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    hdr->magic = htonl(WEX_P2P_MAGIC);
+    hdr->type = WEX_PKT_SYNC_REQ;
+    memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
+    memcpy(hdr->space_id, node->active_space_id, 32);
+
+    size_t ch_len = strlen(node->active_channel) + 1;
+    hdr->payload_len = htons((uint16_t)ch_len);
+    memcpy(buffer + sizeof(wex_pkt_hdr_t), node->active_channel, ch_len);
+
+    sendto(node->udp_fd, buffer, sizeof(wex_pkt_hdr_t) + ch_len, 0,
+           (struct sockaddr *)target_addr, sizeof(*target_addr));
+}
+
 static wex_peer_t *find_or_add_peer(wex_p2p_node_t *node, const struct sockaddr_in *addr, const uint8_t pk[32], const char *nickname) {
-    /* Check existing peer by public key or address */
     for (size_t i = 0; i < node->peer_count; i++) {
         if (memcmp(node->peers[i].pk, pk, 32) == 0 ||
             (node->peers[i].addr.sin_addr.s_addr == addr->sin_addr.s_addr &&
@@ -86,7 +109,6 @@ static wex_peer_t *find_or_add_peer(wex_p2p_node_t *node, const struct sockaddr_
         }
     }
 
-    /* Add new peer */
     if (node->peer_count < WEX_MAX_PEERS) {
         wex_peer_t *p = &node->peers[node->peer_count++];
         p->addr = *addr;
@@ -98,6 +120,7 @@ static wex_peer_t *find_or_add_peer(wex_p2p_node_t *node, const struct sockaddr_
         }
         p->last_seen_ms = get_time_ms();
         p->active = true;
+        p->synced = false;
         return p;
     }
     return NULL;
@@ -114,7 +137,7 @@ int wex_p2p_connect(wex_p2p_node_t *node, const char *ip_str, int port) {
         return -1;
     }
 
-    /* Prepare WEX_PKT_HELLO */
+    /* Send WEX_PKT_HELLO */
     uint8_t buffer[512];
     wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
     hdr->magic = htonl(WEX_P2P_MAGIC);
@@ -132,18 +155,16 @@ int wex_p2p_connect(wex_p2p_node_t *node, const char *ip_str, int port) {
     return (sent == (ssize_t)total_len) ? 0 : -1;
 }
 
-int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg) {
-    if (!node || node->udp_fd < 0 || !msg) return -1;
+static size_t serialize_chat_msg(const wex_chat_msg_t *msg, uint8_t *out_buf, size_t max_buf) {
+    if (!msg || !out_buf || max_buf < sizeof(wex_pkt_hdr_t) + 128) return 0;
 
-    uint8_t buffer[WEX_MAX_UDP_PAYLOAD];
-    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)out_buf;
     hdr->magic = htonl(WEX_P2P_MAGIC);
     hdr->type = WEX_PKT_CHAT_MSG;
     memcpy(hdr->sender_pk, msg->author_pk, 32);
     memcpy(hdr->space_id, msg->space_id, 32);
 
-    /* Serialize message fields: channel, author, timestamp, content, signature */
-    uint8_t *payload = buffer + sizeof(wex_pkt_hdr_t);
+    uint8_t *payload = out_buf + sizeof(wex_pkt_hdr_t);
     size_t off = 0;
 
     /* Channel */
@@ -171,7 +192,15 @@ int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg) {
     off += 64;
 
     hdr->payload_len = htons((uint16_t)off);
-    size_t total_len = sizeof(wex_pkt_hdr_t) + off;
+    return sizeof(wex_pkt_hdr_t) + off;
+}
+
+int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg) {
+    if (!node || node->udp_fd < 0 || !msg) return -1;
+
+    uint8_t buffer[WEX_MAX_UDP_PAYLOAD];
+    size_t total_len = serialize_chat_msg(msg, buffer, sizeof(buffer));
+    if (total_len == 0) return -1;
 
     int sent_count = 0;
     for (size_t i = 0; i < node->peer_count; i++) {
@@ -209,12 +238,12 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
 
     const wex_pkt_hdr_t *hdr = (const wex_pkt_hdr_t *)buffer;
     if (ntohl(hdr->magic) != WEX_P2P_MAGIC) {
-        return 0; /* Invalid magic, ignore foreign traffic */
+        return 0;
     }
 
     uint16_t payload_len = ntohs(hdr->payload_len);
     if ((size_t)n < sizeof(wex_pkt_hdr_t) + payload_len) {
-        return 0; /* Truncated datagram */
+        return 0;
     }
 
     const uint8_t *payload = buffer + sizeof(wex_pkt_hdr_t);
@@ -257,14 +286,44 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
                 memcpy(peer_nick, payload, cpy);
             }
             wex_peer_t *p = find_or_add_peer(node, &src_addr, hdr->sender_pk, peer_nick);
-            if (p && node->peer_cb) {
-                node->peer_cb(p, true, node->user_data);
+            if (p) {
+                if (node->peer_cb) {
+                    node->peer_cb(p, true, node->user_data);
+                }
+                /* Immediately request swarm history synchronization! */
+                if (!p->synced) {
+                    wex_p2p_request_sync(node, &p->addr);
+                    p->synced = true;
+                }
+            }
+            break;
+        }
+
+        case WEX_PKT_SYNC_REQ: {
+            /* Peer is asking for recent chat history */
+            char target_ch[WEX_NAME_LEN] = "general";
+            if (payload_len > 0) {
+                size_t cpy = (payload_len < sizeof(target_ch) - 1) ? payload_len : sizeof(target_ch) - 1;
+                memcpy(target_ch, payload, cpy);
+                target_ch[cpy] = '\0';
+            }
+
+            if (node->sync_cb) {
+                wex_chat_msg_t hist_msgs[32];
+                size_t hist_count = node->sync_cb(hdr->space_id, target_ch, hist_msgs, 32, node->user_data);
+                for (size_t i = 0; i < hist_count; i++) {
+                    uint8_t out_buf[WEX_MAX_UDP_PAYLOAD];
+                    size_t out_len = serialize_chat_msg(&hist_msgs[i], out_buf, sizeof(out_buf));
+                    if (out_len > 0) {
+                        sendto(node->udp_fd, out_buf, out_len, 0,
+                               (struct sockaddr *)&src_addr, sizeof(src_addr));
+                    }
+                }
             }
             break;
         }
 
         case WEX_PKT_PING: {
-            /* Reply with PONG */
             uint8_t pong_buf[sizeof(wex_pkt_hdr_t)];
             wex_pkt_hdr_t *pong_hdr = (wex_pkt_hdr_t *)pong_buf;
             pong_hdr->magic = htonl(WEX_P2P_MAGIC);
@@ -278,7 +337,6 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
         }
 
         case WEX_PKT_CHAT_MSG: {
-            /* Parse chat message */
             if (payload_len < 64 + sizeof(uint64_t) + 2) return 0;
 
             wex_chat_msg_t msg;
