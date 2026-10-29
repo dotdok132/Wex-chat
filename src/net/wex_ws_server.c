@@ -385,8 +385,40 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
             }
             cJSON_Delete(out);
 
-            /* 2. Broadcast over real P2P UDP swarm to all connected peer nodes! */
-            wex_p2p_broadcast_msg(&srv->p2p, &msg);
+            /* 2. Broadcast over direct 1-hop UDP peers */
+            int sent_direct = wex_p2p_broadcast_msg(&srv->p2p, &msg);
+
+            /* 3. DHT Overlay Fallback:
+             * If target peer or topic providers are not directly connected,
+             * resolve route via Kademlia DHT and dispatch via wex_p2p_relay_msg! */
+            cJSON *target_hex = cJSON_GetObjectItem(root, "target_id");
+            if (target_hex && cJSON_IsString(target_hex) && strlen(target_hex->valuestring) == 64) {
+                uint8_t target_pk[32];
+                if (wex_hex_to_id(target_hex->valuestring, target_pk) == 0) {
+                    wex_p2p_relay_msg(&srv->p2p, target_pk, &msg);
+                }
+            } else {
+                /* Lookup topic providers in Kademlia DHT */
+                wex_dht_provider_t provs[WEX_DHT_MAX_PROVIDERS];
+                size_t prov_count = wex_dht_get_topic_providers(&srv->p2p.dht, msg.space_id, provs, WEX_DHT_MAX_PROVIDERS);
+                for (size_t p = 0; p < prov_count; p++) {
+                    bool is_direct = false;
+                    for (size_t d = 0; d < srv->p2p.peer_count; d++) {
+                        if (srv->p2p.peers[d].active && memcmp(srv->p2p.peers[d].pk, provs[p].peer_id, 32) == 0) {
+                            is_direct = true;
+                            break;
+                        }
+                    }
+                    if (!is_direct && memcmp(provs[p].peer_id, srv->identity.sign_pk, 32) != 0) {
+                        wex_p2p_relay_msg(&srv->p2p, provs[p].peer_id, &msg);
+                    }
+                }
+
+                /* If no direct 1-hop peer was reached, route through DHT next-hop toward space_id */
+                if (sent_direct == 0 && prov_count == 0 && srv->p2p.dht.total_contacts > 0) {
+                    wex_p2p_relay_msg(&srv->p2p, msg.space_id, &msg);
+                }
+            }
         }
     }
 

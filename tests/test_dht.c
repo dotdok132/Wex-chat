@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <arpa/inet.h>
 
 #define TEST_PASS(name) printf("  [PASS] %s\n", name)
 
@@ -254,6 +255,57 @@ static void test_end_to_end_transit_relay(void) {
     wex_p2p_close(&node_c);
 }
 
+static void test_dht_find_node_network_query(void) {
+    wex_identity_t id_a, id_b;
+    assert(wex_identity_init(&id_a, NULL, "NodeA") == 0);
+    assert(wex_identity_init(&id_b, NULL, "NodeB") == 0);
+
+    wex_p2p_node_t node_a, node_b;
+    assert(wex_p2p_init(&node_a, &id_a, 26001) == 0);
+    assert(wex_p2p_init(&node_b, &id_b, 26002) == 0);
+
+    /* Populate Node B's DHT routing table with 3 contacts */
+    struct sockaddr_in mock_addr;
+    memset(&mock_addr, 0, sizeof(mock_addr));
+    mock_addr.sin_family = AF_INET;
+
+    for (int i = 0; i < 3; i++) {
+        uint8_t peer_id[32];
+        memset(peer_id, 0x90 + i, 32);
+        mock_addr.sin_port = htons((uint16_t)(30001 + i));
+        wex_dht_update_contact(&node_b.dht, peer_id, &mock_addr, 1000);
+    }
+    assert(node_b.dht.total_contacts == 3);
+    assert(node_a.dht.total_contacts == 0);
+
+    /* Node A queries Node B via UDP for nodes close to 0x90 */
+    struct sockaddr_in b_addr;
+    memset(&b_addr, 0, sizeof(b_addr));
+    b_addr.sin_family = AF_INET;
+    b_addr.sin_port = htons(26002);
+    inet_pton(AF_INET, "127.0.0.1", &b_addr.sin_addr);
+
+    uint8_t search_target[32];
+    memset(search_target, 0x90, 32);
+
+    assert(wex_p2p_send_find_node(&node_a, &b_addr, search_target) == 0);
+
+    /* Poll nodes: Node B receives FIND_NODE, runs wex_dht_find_closest, replies with NODES; Node A receives NODES */
+    for (int t = 0; t < 10; t++) {
+        wex_p2p_poll(&node_b, 5);
+        wex_p2p_poll(&node_a, 5);
+        usleep(5000);
+    }
+
+    /* Node A must now have populated its DHT routing table with the contacts returned by Node B! */
+    assert(node_a.dht.total_contacts >= 3);
+
+    TEST_PASS("Network FIND_NODE <-> NODES query-response dynamically populates DHT routing table");
+
+    wex_p2p_close(&node_a);
+    wex_p2p_close(&node_b);
+}
+
 int main(void) {
     printf("====================================================\n");
     printf("  Running Wex Kademlia DHT & Overlay Routing Tests  \n");
@@ -265,6 +317,7 @@ int main(void) {
     test_swarm_topic_providers();
     test_transit_relay_next_hop();
     test_end_to_end_transit_relay();
+    test_dht_find_node_network_query();
 
     printf("====================================================\n");
     printf("  ALL KADEMLIA DHT TESTS PASSED SUCCESSFULLY!       \n");

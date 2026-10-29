@@ -250,6 +250,24 @@ int wex_p2p_relay_msg(wex_p2p_node_t *node, const uint8_t dst_id[32], const wex_
     return (s == (ssize_t)total_len) ? 0 : -1;
 }
 
+int wex_p2p_send_find_node(wex_p2p_node_t *node, const struct sockaddr_in *target_addr, const uint8_t search_id[32]) {
+    if (!node || node->udp_fd < 0 || !target_addr || !search_id) return -1;
+
+    uint8_t buffer[sizeof(wex_pkt_hdr_t) + 32];
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    hdr->magic = htonl(WEX_P2P_MAGIC);
+    hdr->type = WEX_PKT_DHT_FIND_NODE;
+    memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
+    memcpy(hdr->space_id, node->active_space_id, 32);
+    hdr->payload_len = htons(32);
+
+    memcpy(buffer + sizeof(wex_pkt_hdr_t), search_id, 32);
+
+    ssize_t s = sendto(node->udp_fd, buffer, sizeof(buffer), 0,
+                       (struct sockaddr *)target_addr, sizeof(*target_addr));
+    return (s == (ssize_t)sizeof(buffer)) ? 0 : -1;
+}
+
 static void parse_and_deliver_chat_msg(wex_p2p_node_t *node, const uint8_t *payload, size_t payload_len, const uint8_t sender_pk[32], const uint8_t space_id[32]) {
     if (payload_len < 64 + sizeof(uint64_t) + 2) return;
 
@@ -453,6 +471,58 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
             pong_hdr->payload_len = 0;
             sendto(node->udp_fd, pong_buf, sizeof(pong_buf), 0,
                    (struct sockaddr *)&src_addr, sizeof(src_addr));
+            break;
+        }
+
+        case WEX_PKT_DHT_FIND_NODE: {
+            if (payload_len < 32) break;
+            const uint8_t *search_target = payload;
+
+            /* Query Kademlia routing table for K closest contacts */
+            wex_dht_contact_t closest[WEX_DHT_K];
+            size_t found = wex_dht_find_closest(&node->dht, search_target, closest, WEX_DHT_K);
+
+            /* Serialize and send WEX_PKT_DHT_NODES response */
+            uint8_t resp_buf[WEX_MAX_UDP_PAYLOAD];
+            wex_pkt_hdr_t *resp_hdr = (wex_pkt_hdr_t *)resp_buf;
+            resp_hdr->magic = htonl(WEX_P2P_MAGIC);
+            resp_hdr->type = WEX_PKT_DHT_NODES;
+            memcpy(resp_hdr->sender_pk, node->identity->sign_pk, 32);
+            memcpy(resp_hdr->space_id, hdr->space_id, 32);
+
+            uint8_t *out = resp_buf + sizeof(wex_pkt_hdr_t);
+            out[0] = (uint8_t)found;
+            size_t off = 1;
+
+            for (size_t i = 0; i < found; i++) {
+                memcpy(out + off, closest[i].id, 32);
+                off += 32;
+                memcpy(out + off, &closest[i].addr, sizeof(struct sockaddr_in));
+                off += sizeof(struct sockaddr_in);
+            }
+
+            resp_hdr->payload_len = htons((uint16_t)off);
+            sendto(node->udp_fd, resp_buf, sizeof(wex_pkt_hdr_t) + off, 0,
+                   (struct sockaddr *)&src_addr, sizeof(src_addr));
+            break;
+        }
+
+        case WEX_PKT_DHT_NODES: {
+            if (payload_len < 1) break;
+            uint8_t count = payload[0];
+            size_t item_size = 32 + sizeof(struct sockaddr_in);
+            if (payload_len < 1 + count * item_size) break;
+
+            size_t off = 1;
+            for (uint8_t i = 0; i < count; i++) {
+                const uint8_t *peer_id = payload + off;
+                off += 32;
+                const struct sockaddr_in *peer_addr = (const struct sockaddr_in *)(payload + off);
+                off += sizeof(struct sockaddr_in);
+
+                /* Add/update discovered node in our Kademlia routing table! */
+                wex_dht_update_contact(&node->dht, peer_id, peer_addr, get_time_ms());
+            }
             break;
         }
 

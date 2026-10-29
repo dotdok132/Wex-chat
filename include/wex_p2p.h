@@ -24,7 +24,9 @@ typedef enum {
     WEX_PKT_CHAT_MSG      = 0x10, /* Direct encrypted & signed chat message */
     WEX_PKT_STORE_SHARD   = 0x20, /* Quas Store-and-Forward shard for offline peer */
     WEX_PKT_PULL_SHARDS   = 0x21, /* Offline peer querying for stored shards */
-    WEX_PKT_OVERLAY_RELAY = 0x30  /* Transit overlay multi-hop relay */
+    WEX_PKT_DHT_FIND_NODE = 0x30, /* Query closest K nodes in Kademlia routing table */
+    WEX_PKT_DHT_NODES     = 0x31, /* Response with closest K contacts */
+    WEX_PKT_OVERLAY_RELAY = 0x32  /* Transit overlay multi-hop relay */
 } wex_pkt_type_t;
 
 /* Binary header on the wire */
@@ -93,6 +95,9 @@ int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg);
 
 /* Transit overlay routing: forwards a message toward destination ID through next-hop in DHT */
 int wex_p2p_relay_msg(wex_p2p_node_t *node, const uint8_t dst_id[32], const wex_chat_msg_t *msg);
+
+/* Query remote peer for closest K nodes to search_id */
+int wex_p2p_send_find_node(wex_p2p_node_t *node, const struct sockaddr_in *target_addr, const uint8_t search_id[32]);
 
 /* Process incoming UDP datagrams */
 int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms);
