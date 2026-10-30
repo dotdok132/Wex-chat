@@ -100,9 +100,27 @@
     .input-wrapper input[type="text"]::placeholder { color: var(--text-muted); }
     .attach-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); padding: 0 4px; display: flex; align-items: center; }
     .attach-btn:hover { color: #fff; }
+    .send-btn { background: var(--accent); border: none; border-radius: 6px; color: #fff; font-size: 14px; font-weight: bold; padding: 6px 12px; cursor: pointer; display: flex; align-items: center; }
+    .send-btn:hover { background: var(--accent-hover); }
+    .menu-toggle { display: none; background: none; border: none; color: var(--text-normal); font-size: 22px; cursor: pointer; padding: 0 6px 0 0; }
+    #drawer-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 90; }
+
+    @media (max-width: 768px) {
+      .menu-toggle { display: block; }
+      #guilds-bar { position: fixed; left: -320px; top: 0; bottom: 0; z-index: 101; transition: left 0.22s ease; }
+      #channels-bar { position: fixed; left: -248px; top: 0; bottom: 0; z-index: 100; transition: left 0.22s ease; box-shadow: 4px 0 16px rgba(0,0,0,0.5); }
+      body.drawer-open #guilds-bar { left: 0; }
+      body.drawer-open #channels-bar { left: 72px; }
+      body.drawer-open #drawer-backdrop { display: block; }
+      #active-channel-topic { display: none; }
+      .chat-header { padding: 0 10px; }
+      .btn { padding: 5px 8px; font-size: 11px; }
+      .msg-actions { display: flex; position: static; margin-top: 4px; width: fit-content; }
+    }
   </style>
 </head>
 <body>
+  <div id="drawer-backdrop" onclick="toggleMobileDrawer(false)"></div>
   <div id="guilds-bar">
     <div class="guild-icon active" id="space-avatar">W</div>
     <div class="guild-icon add-btn" title="Создать новое сообщество" onclick="createNewSpace()">+</div>
@@ -145,23 +163,25 @@
       <button class="btn secondary" style="padding:4px 8px; font-size:10px;" onclick="toggleVoiceConnect('voice-lounge')">Выйти</button>
     </div>
 
-    <div class="user-footer">
+    <div class="user-footer" style="cursor:pointer;" title="Нажмите для смены никнейма / просмотра ключа" onclick="editProfilePrompt()">
       <div class="user-avatar" id="my-avatar">U</div>
       <div class="user-info">
         <div class="user-name" id="my-nickname">Connecting...</div>
         <div class="user-status" id="my-node-status">P2P UDP Ready</div>
       </div>
+      <span style="color:var(--text-muted); font-size:15px;">⚙️</span>
     </div>
   </div>
   
   <div id="chat-area">
     <div class="chat-header">
+      <button class="menu-toggle" onclick="toggleMobileDrawer()" title="Меню">☰</button>
       <span style="color:var(--text-muted)">#</span>
       <span id="active-channel-name" style="color:#fff; font-weight:bold">general</span>
       <span id="active-channel-topic">| Sovereign P2P Swarm</span>
       <div class="header-btns">
-        <button class="btn secondary" onclick="connectToPeerPrompt()">+ Добавить пир</button>
-        <button class="btn" onclick="copyInvite()">Пригласить друга</button>
+        <button class="btn secondary" onclick="connectToPeerPrompt()">+ Пир</button>
+        <button class="btn" onclick="copyInvite()">Инвайт</button>
       </div>
     </div>
     <div class="messages-feed" id="messages"></div>
@@ -170,6 +190,7 @@
         <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(event)">
         <button class="attach-btn" title="Прикрепить файл (P2P Blob)" onclick="document.getElementById('file-input').click()">📎</button>
         <input type="text" id="msg-input" placeholder="Написать в #general (Enter для отправки)..." autocomplete="off">
+        <button class="send-btn" onclick="submitCurrentMessage()" title="Отправить">➤</button>
       </div>
     </div>
   </div>
@@ -379,6 +400,25 @@
       });
     }
 
+    function toggleMobileDrawer(forceState) {
+      if (typeof forceState === 'boolean') {
+        document.body.classList.toggle('drawer-open', forceState);
+      } else {
+        document.body.classList.toggle('drawer-open');
+      }
+    }
+
+    function editProfilePrompt() {
+      const newNick = prompt(`Ваш Ed25519 ID:\n${myPublicKey}\n\nВведите новый никнейм:`, myNick);
+      if (newNick && newNick.trim().length > 0 && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          action: 'set_profile',
+          nickname: newNick.trim(),
+          status: 'Online'
+        }));
+      }
+    }
+
     function switchDm(dmChannel, nick, pk) {
       currentChannel = dmChannel;
       currentDmPeerPk = pk;
@@ -387,6 +427,7 @@
       document.getElementById('active-channel-name').innerText = `🔒 ${nick}`;
       document.getElementById('active-channel-topic').innerText = `| E2EE Private Channel`;
       document.getElementById('msg-input').placeholder = `Личное сообщение для @${nick}...`;
+      toggleMobileDrawer(false);
     }
 
     function switchChannel(ch, elem) {
@@ -401,6 +442,7 @@
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ action: 'switch_channel', name: ch }));
       }
+      toggleMobileDrawer(false);
     }
 
     function createNewChannel() {
@@ -570,26 +612,32 @@
       }
     }
 
-    document.getElementById('msg-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.target.value.trim() !== '') {
-        const text = e.target.value.trim();
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          if (currentChannel.startsWith('dm:') && currentDmPeerPk) {
-            ws.send(JSON.stringify({
-              action: 'send_dm',
-              target_pk: currentDmPeerPk,
-              text: text
-            }));
-          } else {
-            ws.send(JSON.stringify({
-              action: 'send_message',
-              space_id: currentSpaceId,
-              channel: currentChannel,
-              text: text
-            }));
-          }
-          e.target.value = '';
+    function submitCurrentMessage() {
+      const inputEl = document.getElementById('msg-input');
+      if (!inputEl || inputEl.value.trim() === '') return;
+      const text = inputEl.value.trim();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        if (currentChannel.startsWith('dm:') && currentDmPeerPk) {
+          ws.send(JSON.stringify({
+            action: 'send_dm',
+            target_pk: currentDmPeerPk,
+            text: text
+          }));
+        } else {
+          ws.send(JSON.stringify({
+            action: 'send_message',
+            space_id: currentSpaceId,
+            channel: currentChannel,
+            text: text
+          }));
         }
+        inputEl.value = '';
+      }
+    }
+
+    document.getElementById('msg-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        submitCurrentMessage();
       }
     });
 

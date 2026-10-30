@@ -53,24 +53,35 @@ static void *daemon_worker_thread(void *arg) {
         LOGI("[+] Journal opened at %s", journal_path);
     }
 
-    wex_server_t server;
-    if (wex_server_init(&server, s_args.ws_port, s_args.udp_port, ident.nickname) != 0) {
-        LOGE("[-] Failed to initialize Wex server");
+    wex_server_t *server = (wex_server_t *)calloc(1, sizeof(wex_server_t));
+    if (!server) {
+        LOGE("[-] Failed to allocate wex_server_t on heap");
         if (journal) wex_journal_close(journal);
         s_thread_running = false;
         return NULL;
     }
 
-    server.identity = ident;
-    server.p2p.identity = &server.identity;
-
-    if (journal) {
-        server.journal = journal;
-        wex_p2p_set_journal(&server.p2p, journal);
+    if (wex_server_init(server, s_args.ws_port, s_args.udp_port, ident.nickname) != 0) {
+        LOGE("[-] Failed to initialize Wex server");
+        free(server);
+        if (journal) wex_journal_close(journal);
+        s_thread_running = false;
+        return NULL;
     }
 
-    if (wex_server_start(&server) != 0) {
+    server->identity = ident;
+    server->p2p.identity = &server->identity;
+    memcpy(server->p2p.dht.local_id, server->identity.sign_pk, 32);
+    wex_p2p_set_data_dir(&server->p2p, s_args.data_dir);
+
+    if (journal) {
+        server->journal = journal;
+        wex_p2p_set_journal(&server->p2p, journal);
+    }
+
+    if (wex_server_start(server) != 0) {
         LOGE("[-] Failed to start Wex server on WS port %d, UDP %d", s_args.ws_port, s_args.udp_port);
+        free(server);
         if (journal) wex_journal_close(journal);
         s_thread_running = false;
         return NULL;
@@ -78,32 +89,33 @@ static void *daemon_worker_thread(void *arg) {
 
     /* Auto STUN WAN probe in background */
     struct sockaddr_in ext_addr;
-    if (wex_nat_auto_discover(server.p2p.udp_fd, &ext_addr) == 0) {
+    if (wex_nat_auto_discover(server->p2p.udp_fd, &ext_addr) == 0) {
         char ext_str[64];
         wex_addr_to_string(&ext_addr, ext_str, sizeof(ext_str));
-        server.p2p.external_addr = ext_addr;
-        server.p2p.has_external_addr = true;
+        server->p2p.external_addr = ext_addr;
+        server->p2p.has_external_addr = true;
         LOGI("[+] STUN public endpoint: %s", ext_str);
     }
 
     /* Optional bootstrap peer or invite URI */
     if (s_args.bootstrap[0] != '\0') {
         LOGI("[*] Connecting to bootstrap target %s", s_args.bootstrap);
-        wex_p2p_join_invite(&server.p2p, s_args.bootstrap);
+        wex_p2p_join_invite(&server->p2p, s_args.bootstrap);
     }
 
     /* Send immediate LAN discovery beacon */
-    wex_p2p_send_lan_beacon(&server.p2p);
+    wex_p2p_send_lan_beacon(&server->p2p);
 
     LOGI("[+] Wex daemon running event loop");
     s_thread_running = true;
 
     while (!s_stop_requested) {
-        wex_server_poll(&server, 100);
+        wex_server_poll(server, 100);
     }
 
     LOGI("[*] Stopping Wex server...");
-    wex_server_stop(&server);
+    wex_server_stop(server);
+    free(server);
     if (journal) {
         wex_journal_close(journal);
     }

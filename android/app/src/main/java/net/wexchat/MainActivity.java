@@ -1,6 +1,8 @@
 package net.wexchat;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.os.Bundle;
 import android.os.Build;
 import android.content.Intent;
@@ -10,6 +12,9 @@ import android.webkit.WebSettings;
 import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
 import android.webkit.PermissionRequest;
+import android.webkit.JsResult;
+import android.webkit.JsPromptResult;
+import android.widget.EditText;
 import android.graphics.Color;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,6 +28,47 @@ public class MainActivity extends Activity {
             if (request != null && request.getResources() != null) {
                 request.grant(request.getResources());
             }
+        }
+
+        @Override
+        public boolean onJsAlert(WebView view, String url, String message, final JsResult result) {
+            new AlertDialog.Builder(view.getContext())
+                .setTitle("Wex-Chat")
+                .setMessage(message)
+                .setPositiveButton("OK", (dialog, which) -> result.confirm())
+                .setCancelable(false)
+                .show();
+            return true;
+        }
+
+        @Override
+        public boolean onJsConfirm(WebView view, String url, String message, final JsResult result) {
+            new AlertDialog.Builder(view.getContext())
+                .setTitle("Wex-Chat")
+                .setMessage(message)
+                .setPositiveButton("Да", (dialog, which) -> result.confirm())
+                .setNegativeButton("Отмена", (dialog, which) -> result.cancel())
+                .setCancelable(false)
+                .show();
+            return true;
+        }
+
+        @Override
+        public boolean onJsPrompt(WebView view, String url, String message, String defaultValue, final JsPromptResult result) {
+            final EditText input = new EditText(view.getContext());
+            if (defaultValue != null) {
+                input.setText(defaultValue);
+                input.selectAll();
+            }
+            new AlertDialog.Builder(view.getContext())
+                .setTitle("Wex-Chat")
+                .setMessage(message)
+                .setView(input)
+                .setPositiveButton("OK", (dialog, which) -> result.confirm(input.getText().toString()))
+                .setNegativeButton("Отмена", (dialog, which) -> result.cancel())
+                .setCancelable(false)
+                .show();
+            return true;
         }
     }
 
