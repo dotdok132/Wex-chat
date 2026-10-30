@@ -86,19 +86,14 @@ static void *daemon_worker_thread(void *arg) {
         LOGI("[+] STUN public endpoint: %s", ext_str);
     }
 
-    /* Optional bootstrap peer */
+    /* Optional bootstrap peer or invite URI */
     if (s_args.bootstrap[0] != '\0') {
-        char ip_buf[128];
-        strncpy(ip_buf, s_args.bootstrap, sizeof(ip_buf) - 1);
-        ip_buf[sizeof(ip_buf) - 1] = '\0';
-        char *colon = strchr(ip_buf, ':');
-        if (colon) {
-            *colon = '\0';
-            int peer_p = atoi(colon + 1);
-            LOGI("[*] Connecting to bootstrap peer %s:%d", ip_buf, peer_p);
-            wex_server_connect_peer(&server, ip_buf, peer_p);
-        }
+        LOGI("[*] Connecting to bootstrap target %s", s_args.bootstrap);
+        wex_p2p_join_invite(&server.p2p, s_args.bootstrap);
     }
+
+    /* Send immediate LAN discovery beacon */
+    wex_p2p_send_lan_beacon(&server.p2p);
 
     LOGI("[+] Wex daemon running event loop");
     s_thread_running = true;

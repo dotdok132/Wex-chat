@@ -122,6 +122,7 @@ int main(int argc, char **argv) {
 
     char current_channel[64] = "general";
     char current_space_id[65] = "";
+    char current_invite_uri[512] = "";
 
     struct pollfd fds[2];
     fds[0].fd = STDIN_FILENO;
@@ -202,9 +203,32 @@ int main(int argc, char **argv) {
                 } else {
                     printf("\033[1;31mUsage: /react <signature_hex> <emoji>\033[0m\n");
                 }
+            } else if (strcmp(line_buf, "/invite") == 0) {
+                if (current_invite_uri[0] != '\0') {
+                    printf("\033[1;32m[+] Shareable Invite URI:\n    %s\033[0m\n", current_invite_uri);
+                } else {
+                    send_ws_text(ws_fd, "{\"action\":\"get_status\"}");
+                }
+            } else if (strncmp(line_buf, "/join ", 6) == 0 || strncmp(line_buf, "/connect ", 9) == 0) {
+                const char *target = strchr(line_buf, ' ');
+                if (target) {
+                    while (*target == ' ') target++;
+                    cJSON *cmd = cJSON_CreateObject();
+                    cJSON_AddStringToObject(cmd, "action", "connect_peer");
+                    cJSON_AddStringToObject(cmd, "target", target);
+                    char *s = cJSON_PrintUnformatted(cmd);
+                    if (s) {
+                        send_ws_text(ws_fd, s);
+                        free(s);
+                    }
+                    cJSON_Delete(cmd);
+                    printf("\033[1;36m[*] Connecting via invite / DHT target: %s\033[0m\n", target);
+                }
             } else if (strcmp(line_buf, "/help") == 0) {
                 printf("\033[1;33m=== Wex-Chat CLI Help ===\033[0m\n");
                 printf("  <text>                 Send chat message to active channel\n");
+                printf("  /invite                Display shareable 1-click wex:// invite URI\n");
+                printf("  /join <uri|pk|ip:port> Connect via wex:// invite, 64-char Public Key, or IP:port\n");
                 printf("  /switch <channel>      Switch active channel (e.g. dev, offtopic)\n");
                 printf("  /dm <pk_hex> <text>    Send end-to-end encrypted direct message\n");
                 printf("  /react <sig> <emoji>   Add/toggle emoji reaction\n");
@@ -275,6 +299,10 @@ int main(int argc, char **argv) {
                         if (ident) {
                             cJSON *nick = cJSON_GetObjectItem(ident, "nickname");
                             cJSON *port = cJSON_GetObjectItem(ident, "udp_port");
+                            cJSON *inv = cJSON_GetObjectItem(ident, "invite_uri");
+                            if (inv && cJSON_IsString(inv)) {
+                                strncpy(current_invite_uri, inv->valuestring, sizeof(current_invite_uri) - 1);
+                            }
                             printf("\033[1;32m[i] Identity: %s | UDP Port: %d\033[0m\n",
                                    nick ? nick->valuestring : "?", port ? port->valueint : 0);
                         }

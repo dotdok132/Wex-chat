@@ -158,16 +158,8 @@ int main(int argc, char **argv) {
         }
 
         if (peer_target) {
-            char ip_buf[128];
-            strncpy(ip_buf, peer_target, sizeof(ip_buf) - 1);
-            ip_buf[sizeof(ip_buf) - 1] = '\0';
-            char *colon = strchr(ip_buf, ':');
-            if (colon) {
-                *colon = '\0';
-                int peer_p = atoi(colon + 1);
-                printf("[*] Auto-connecting to bootstrap peer %s:%d...\n", ip_buf, peer_p);
-                wex_p2p_connect(&p2p_node, ip_buf, peer_p);
-            }
+            printf("[*] Connecting to bootstrap target %s...\n", peer_target);
+            wex_p2p_join_invite(&p2p_node, peer_target);
         }
 
         for (size_t b = 0; b < conf.bootstrap_count; b++) {
@@ -175,6 +167,9 @@ int main(int argc, char **argv) {
                    conf.bootstrap_peers[b].host, conf.bootstrap_peers[b].port);
             wex_p2p_connect(&p2p_node, conf.bootstrap_peers[b].host, conf.bootstrap_peers[b].port);
         }
+
+        p2p_node.lan_discovery_enabled = true;
+        wex_p2p_send_lan_beacon(&p2p_node);
 
         printf("[*] Seed node running on UDP :%d. Press Ctrl+C to stop.\n", udp_port);
 
@@ -234,22 +229,22 @@ int main(int argc, char **argv) {
     }
 
     if (peer_target) {
-        char ip_buf[128];
-        strncpy(ip_buf, peer_target, sizeof(ip_buf) - 1);
-        ip_buf[sizeof(ip_buf) - 1] = '\0';
-        char *colon = strchr(ip_buf, ':');
-        if (colon) {
-            *colon = '\0';
-            int peer_p = atoi(colon + 1);
-            printf("[*] Auto-connecting to initial P2P peer %s:%d...\n", ip_buf, peer_p);
-            wex_server_connect_peer(&server, ip_buf, peer_p);
-        }
+        printf("[*] Auto-connecting to target / invite %s...\n", peer_target);
+        wex_p2p_join_invite(&server.p2p, peer_target);
     }
 
     for (size_t b = 0; b < conf.bootstrap_count; b++) {
         printf("[*] Auto-connecting to config bootstrap peer %s:%d...\n",
                conf.bootstrap_peers[b].host, conf.bootstrap_peers[b].port);
         wex_server_connect_peer(&server, conf.bootstrap_peers[b].host, conf.bootstrap_peers[b].port);
+    }
+
+    /* Send immediate zero-config LAN discovery beacon */
+    wex_p2p_send_lan_beacon(&server.p2p);
+
+    char invite_uri[512];
+    if (wex_p2p_create_invite(&server.p2p, invite_uri, sizeof(invite_uri)) == 0) {
+        printf("[+] Shareable 1-Click Invite Link:\n    %s\n", invite_uri);
     }
 
     printf("[+] Open your browser at: http://127.0.0.1:%d\n", ws_port);

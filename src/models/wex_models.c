@@ -39,12 +39,18 @@ int wex_identity_init(wex_identity_t *ident, const uint8_t *seed, const char *ni
         }
     }
 
-    /* Derive Ed25519 keypair from seed */
-    crypto_ed25519_key_pair(ident->sign_sk, ident->sign_pk, ident->seed);
+    /* Derive Ed25519 keypair from a copy of seed (crypto_ed25519_key_pair wipes its seed argument) */
+    uint8_t seed_copy[32];
+    memcpy(seed_copy, ident->seed, 32);
+    crypto_ed25519_key_pair(ident->sign_sk, ident->sign_pk, seed_copy);
 
-    /* Derive X25519 keypair from seed */
-    crypto_blake2b_keyed(ident->x25519_sk, 32, (const uint8_t *)"WEX_X25519_KEY_v1", 17, ident->seed, 32);
-    crypto_x25519_public_key(ident->x25519_pk, ident->x25519_sk);
+    /* Derive birationally equivalent X25519 keypair from SHA-512(seed) so that
+     * crypto_eddsa_to_x25519(sign_pk) == x25519_pk (enables offline zero-roundtrip E2EE DMs) */
+    uint8_t sha_out[64];
+    crypto_sha512(sha_out, ident->seed, 32);
+    crypto_eddsa_trim_scalar(ident->x25519_sk, sha_out);
+    crypto_wipe(sha_out, sizeof(sha_out));
+    crypto_eddsa_to_x25519(ident->x25519_pk, ident->sign_pk);
 
     if (nickname && strlen(nickname) > 0) {
         strncpy(ident->nickname, nickname, sizeof(ident->nickname) - 1);

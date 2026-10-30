@@ -149,7 +149,7 @@
       <div class="user-avatar" id="my-avatar">U</div>
       <div class="user-info">
         <div class="user-name" id="my-nickname">Connecting...</div>
-        <div class="user-status" id="my-node-status" onclick="changeNodeUrl()" title="Сменить адрес ноды Wex">P2P UDP Ready</div>
+        <div class="user-status" id="my-node-status">P2P UDP Ready</div>
       </div>
     </div>
   </div>
@@ -181,6 +181,8 @@
     let currentDmPeerPk = null;
     let myNick = 'User';
     let myUdpPort = 9001;
+    let myPublicKey = '';
+    let myInviteUri = '';
     let spacesCache = [];
     let peersCache = [];
     let openDms = new Set();
@@ -188,10 +190,8 @@
     let voiceConnected = false;
 
     function connectWS() {
-      const savedHost = localStorage.getItem('wex_node_url');
       const loc = window.location;
-      let host = savedHost || (loc.host ? loc.host : '127.0.0.1:9000');
-      const wsUrl = (loc.protocol === 'https:' ? 'wss://' : 'ws://') + host;
+      const wsUrl = (loc.protocol === 'https:' ? 'wss://' : 'ws://') + (loc.host || '127.0.0.1:9000');
       ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
@@ -204,9 +204,16 @@
         if (data.type === 'status') {
           myNick = data.identity.nickname;
           myUdpPort = data.identity.udp_port || 9001;
+          myPublicKey = data.identity.public_key || '';
+          myInviteUri = data.identity.invite_uri || '';
+          const dhtCount = data.identity.dht_contacts || 0;
+          const wanEp = data.identity.external_endpoint || '';
           document.getElementById('my-nickname').innerText = myNick;
+          document.getElementById('my-nickname').title = 'Public ID: ' + myPublicKey;
           document.getElementById('my-avatar').innerText = myNick.charAt(0).toUpperCase();
-          document.getElementById('my-node-status').innerText = `UDP :${myUdpPort} | P2P`;
+          document.getElementById('my-node-status').innerText = wanEp
+            ? `WAN ${wanEp} | DHT:${dhtCount}`
+            : `UDP :${myUdpPort} | DHT:${dhtCount}`;
           
           if (data.spaces && data.spaces.length > 0) {
             spacesCache = data.spaces;
@@ -304,6 +311,9 @@
       document.getElementById('server-title').innerText = sp.name;
       renderGuilds(spacesCache);
       renderChannels(sp.channels);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'switch_space', space_id: spaceId }));
+      }
       if (sp.channels && sp.channels.length > 0) {
         switchChannel(sp.channels[0]);
       }
@@ -534,20 +544,20 @@
     }
 
     function copyInvite() {
-      const link = `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}`;
-      navigator.clipboard.writeText(link);
-      alert('Инвайт скопирован! Друг может подключиться к вашему UDP порту:\n' + link);
+      const link = myInviteUri || `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}&pk=${myPublicKey}`;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link);
+      }
+      prompt('Скопируйте вашу инвайт-ссылку (содержит Space ID, E2EE ключ, Public Key и WAN/LAN адрес):', link);
     }
 
     function connectToPeerPrompt() {
-      const target = prompt('Введите IP:Port пира (например, 127.0.0.1:9002):');
-      if (target && target.includes(':')) {
-        const parts = target.split(':');
+      const target = prompt('Вставьте инвайт-ссылку (wex://join/...), 64-значный Public Key друга (DHT + NAT Punch) или адрес (IP:Port):');
+      if (target && target.trim().length > 0) {
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             action: 'connect_peer',
-            ip: parts[0].trim(),
-            port: parseInt(parts[1].trim(), 10)
+            target: target.trim()
           }));
         }
       }
@@ -686,15 +696,6 @@
         srcNode.start();
       } catch (e) {
         console.error('Audio playback error:', e);
-      }
-    }
-
-    function changeNodeUrl() {
-      const current = localStorage.getItem('wex_node_url') || '127.0.0.1:9000';
-      const val = prompt('Введите адрес демона Wex (например 127.0.0.1:9000 или 192.168.1.50:9000):', current);
-      if (val) {
-        localStorage.setItem('wex_node_url', val.trim());
-        location.reload();
       }
     }
 

@@ -299,6 +299,7 @@ int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *ni
     if (wex_p2p_init(&srv->p2p, &srv->identity, srv->udp_port) != 0) {
         return -1;
     }
+    srv->p2p.lan_discovery_enabled = true;
     wex_p2p_add_space(&srv->p2p, &srv->spaces[0]);
     wex_p2p_set_active_space(&srv->p2p, srv->spaces[0].space_id);
     wex_p2p_set_callbacks(&srv->p2p, on_p2p_incoming_msg, on_p2p_peer_event, srv);
@@ -369,6 +370,20 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
     wex_id_to_hex(srv->identity.sign_pk, pk_hex);
     cJSON_AddStringToObject(ident, "public_key", pk_hex);
     cJSON_AddNumberToObject(ident, "udp_port", srv->udp_port);
+    cJSON_AddNumberToObject(ident, "dht_contacts", (double)srv->p2p.dht.total_contacts);
+    if (srv->p2p.has_external_addr) {
+        char ext_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &srv->p2p.external_addr.sin_addr, ext_ip, sizeof(ext_ip));
+        char ext_ep[64];
+        snprintf(ext_ep, sizeof(ext_ep), "%s:%d", ext_ip, (int)ntohs(srv->p2p.external_addr.sin_port));
+        cJSON_AddStringToObject(ident, "external_endpoint", ext_ep);
+    } else {
+        cJSON_AddStringToObject(ident, "external_endpoint", "");
+    }
+    char invite_uri[512];
+    if (wex_p2p_create_invite(&srv->p2p, invite_uri, sizeof(invite_uri)) == 0) {
+        cJSON_AddStringToObject(ident, "invite_uri", invite_uri);
+    }
     cJSON_AddItemToObject(root, "identity", ident);
 
     cJSON *spaces = cJSON_CreateArray();
@@ -456,11 +471,31 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
 
     if (strcmp(action->valuestring, "get_status") == 0) {
         send_status_json(srv, client_fd);
-    } else if (strcmp(action->valuestring, "connect_peer") == 0) {
-        cJSON *ip = cJSON_GetObjectItem(root, "ip");
-        cJSON *port = cJSON_GetObjectItem(root, "port");
-        if (ip && cJSON_IsString(ip) && port && cJSON_IsNumber(port)) {
-            wex_server_connect_peer(srv, ip->valuestring, port->valueint);
+    } else if (strcmp(action->valuestring, "connect_peer") == 0 || strcmp(action->valuestring, "join_invite") == 0) {
+        cJSON *target = cJSON_GetObjectItem(root, "target");
+        if (!target) target = cJSON_GetObjectItem(root, "uri");
+        if (target && cJSON_IsString(target) && strlen(target->valuestring) > 0) {
+            wex_p2p_join_invite(&srv->p2p, target->valuestring);
+            send_status_json(srv, client_fd);
+        } else {
+            cJSON *ip = cJSON_GetObjectItem(root, "ip");
+            cJSON *port = cJSON_GetObjectItem(root, "port");
+            if (ip && cJSON_IsString(ip) && port && cJSON_IsNumber(port)) {
+                wex_server_connect_peer(srv, ip->valuestring, port->valueint);
+                send_status_json(srv, client_fd);
+            } else if (ip && cJSON_IsString(ip) && strlen(ip->valuestring) > 0) {
+                wex_p2p_join_invite(&srv->p2p, ip->valuestring);
+                send_status_json(srv, client_fd);
+            }
+        }
+    } else if (strcmp(action->valuestring, "switch_space") == 0) {
+        cJSON *sp_id = cJSON_GetObjectItem(root, "space_id");
+        if (sp_id && cJSON_IsString(sp_id) && strlen(sp_id->valuestring) == 64) {
+            uint8_t sid[32];
+            if (wex_hex_to_id(sp_id->valuestring, sid) == 0) {
+                wex_p2p_set_active_space(&srv->p2p, sid);
+                send_status_json(srv, client_fd);
+            }
         }
     } else if (strcmp(action->valuestring, "set_profile") == 0) {
         cJSON *nick = cJSON_GetObjectItem(root, "nickname");

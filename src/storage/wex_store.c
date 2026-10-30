@@ -62,6 +62,18 @@ int wex_store_put(wex_store_t *store, const uint8_t recipient_pk[32],
     uint64_t now = current_time_ms();
     wex_store_purge_expired(store, now);
 
+    /* Deduplicate if identical shard is already stored for this recipient */
+    for (int i = 0; i < WEX_STORE_MAX_ITEMS; i++) {
+        if (store->items[i].occupied &&
+            store->items[i].pow_nonce == pow_nonce &&
+            store->items[i].data_len == data_len &&
+            memcmp(store->items[i].recipient_pk, recipient_pk, 32) == 0 &&
+            memcmp(store->items[i].data, data, data_len) == 0) {
+            store->items[i].created_at_ms = now;
+            return 0;
+        }
+    }
+
     /* Find empty slot or oldest slot */
     int target_slot = -1;
     uint64_t oldest_time = UINT64_MAX;

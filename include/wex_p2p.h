@@ -4,6 +4,7 @@
 #include "wex_models.h"
 #include "wex_dht.h"
 #include "wex_persist.h"
+#include "wex_store.h"
 #include "wex_blob.h"
 #include "wex_actions.h"
 #include "wex_voice.h"
@@ -102,9 +103,20 @@ typedef struct {
     /* Kademlia DHT routing table */
     wex_dht_table_t dht;
 
+    /* Quas Store-and-Forward transient offline message cache */
+    wex_store_t offline_store;
+
     /* NAT reflexive endpoint */
     struct sockaddr_in external_addr;
     bool has_external_addr;
+
+    /* Zero-config LAN broadcast discovery */
+    bool lan_discovery_enabled;
+    uint64_t last_lan_beacon_ms;
+
+    /* Pending peer public key lookup for auto-connect/punch */
+    uint8_t pending_connect_pk[32];
+    bool has_pending_connect_pk;
 
     /* Active blob transfer state */
     wex_blob_assembler_t active_download;
@@ -163,6 +175,24 @@ int wex_p2p_send_space_info(wex_p2p_node_t *node, const struct sockaddr_in *targ
 
 /* Connect to a remote peer (sends HELLO) - supports both IP and domain name hostnames */
 int wex_p2p_connect(wex_p2p_node_t *node, const char *host_or_ip, int port);
+
+/* Connect to a peer purely by their 256-bit Ed25519 Public Key via DHT lookup & NAT hole-punching */
+int wex_p2p_connect_by_pk(wex_p2p_node_t *node, const uint8_t target_pk[32]);
+
+/* Generate a zero-config shareable invite URI (wex://join/<space_id>?peer=<ip>:<port>&pk=<pk>&key=<key>&name=<name>) */
+int wex_p2p_create_invite(const wex_p2p_node_t *node, char *out_uri, size_t max_len);
+
+/* Universal connection entry point: accepts wex:// invite URI, 64-char hex Public Key, or host:port */
+int wex_p2p_join_invite(wex_p2p_node_t *node, const char *invite_or_target);
+
+/* Quas Store-and-Forward: push an encrypted offline message shard with PoW to DHT/peers */
+int wex_p2p_store_offline_msg(wex_p2p_node_t *node, const uint8_t recipient_pk[32], const wex_chat_msg_t *msg);
+
+/* Quas Store-and-Forward: pull any cached offline messages for our identity from target peer (or all peers if NULL) */
+int wex_p2p_pull_offline_msgs(wex_p2p_node_t *node, const struct sockaddr_in *target_addr);
+
+/* Broadcast a local LAN/Wi-Fi UDP discovery beacon */
+int wex_p2p_send_lan_beacon(wex_p2p_node_t *node);
 
 /* Explicitly request history sync from a peer */
 void wex_p2p_request_sync(wex_p2p_node_t *node, const struct sockaddr_in *target_addr);
