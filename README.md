@@ -25,34 +25,16 @@ Wex-Chat is an uncompromising privacy-first communication protocol designed to e
 
 ## Architecture Overview
 
-```
-                      +-------------------+
-                      | Outgoing Message  |
-                      +---------+---------+
-                                |
-               +----------------v----------------+
-               | ChaCha20-Poly1305 Encrypted Msg |
-               +----------------+----------------+
-                                |
-             +------------------v------------------+
-             | Shamir Secret Sharing (k-of-n) Split|
-             +------------------+------------------+
-                                |
-            +-------------------+-------------------+
-            |                   |                   |
-     [ Share 1 ]         [ Share 2 ]         [ Share N ]
-            |                   |                   |
-    [ Pad to 1024B ]    [ Pad to 1024B ]    [ Pad to 1024B ]
-            |                   |                   |
-            v                   v                   v
-      ( Route A )         ( Route B )         ( Route N )
-            \                   |                   /
-             +------------------+------------------+
-                                |
-                   +------------v------------+
-                   |  Recipient Node Reasms  |
-                   |  (k shares -> Plaintext)|
-                   +-------------------------+
+```text
+       [ Web / Desktop UI ]  <--- WebSocket JSON-RPC / IPC ---> [ Wex-Chat Daemon ]
+                                                                       |
+       +---------------------------------------------------------------+----------------------------------------+
+       |                                                               |                                        |
+ [ Exort (Crypto) ]                                             [ Wex (P2P Network) ]                   [ Quas (Storage) ]
+ - X25519 ECDH Key Exchange                                     - Kademlia DHT (alpha=3)                - Atomic Identity Key
+ - ChaCha20-Poly1305 E2EE                                       - STUN NAT Traversal (RFC 5389)         - Append-Only Journal
+ - Ed25519 Signatures                                           - Coordinated Hole Punching             - Chunked P2P Blobs
+ - Shamir Secret Sharing (SSS)                                  - Fixed MTU & Voice Framing             - Store-and-Forward
 ```
 
 ---
@@ -62,20 +44,29 @@ Wex-Chat is an uncompromising privacy-first communication protocol designed to e
 ```text
 .
 ├── CMakeLists.txt          # Root build configuration
-├── GEMINI.md               # Agent & developer guidelines
+├── GEMINI.md               # Developer & agent guidelines
+├── wex.conf.example        # Reference configuration file
 ├── include/                # Public C header interfaces
-│   ├── wex_crypto.h        # Key exchange & Shamir secret sharing
-│   ├── wex_packet.h        # Fixed-size packet framing & padding
-│   ├── wex_dht.h           # Distributed hash table & routing
-│   └── wex_net.h           # Non-blocking network I/O
+│   ├── wex_crypto.h        # Key exchange, ChaCha20-Poly1305, Shamir SSS
+│   ├── wex_models.h        # Identities, Spaces, Channels, Chat messages
+│   ├── wex_p2p.h           # P2P engine, mesh packet wire protocol, DMs
+│   ├── wex_dht.h           # Kademlia routing table, lookup, topic providers
+│   ├── wex_nat.h           # STUN RFC 5389 resolver & NAT hole punching
+│   ├── wex_persist.h       # Atomic identity & binary journal persistence
+│   ├── wex_blob.h          # Chunked P2P file/avatar engine & BLAKE2b
+│   ├── wex_config.h        # Configuration file parser (wex.conf)
+│   ├── wex_voice.h         # Voice framing, 48kHz RTP clock, jitter buffer
+│   └── wex_ws_server.h     # High-speed non-blocking WebSocket & HTTP server
 ├── src/                    # Implementation sources
-│   ├── crypto/             # Crypto engine & SSS
-│   ├── packet/             # Serialization & padding
-│   ├── dht/                # Kademlia-inspired routing table
-│   ├── storage/            # Store-and-forward buffer
-│   ├── net/                # Event loop & UDP transport
-│   └── main.c              # Daemon entry point
-└── tests/                  # Unit and integration test suites
+│   ├── crypto/             # Crypto engine & key derivation
+│   ├── models/             # Space/channel models & config parser
+│   ├── dht/                # Kademlia DHT routing table & iterative lookup
+│   ├── storage/            # Disk persistence, message journal, blob storage
+│   ├── net/                # STUN traversal, P2P mesh, voice, WebSocket server
+│   └── main.c              # Unified daemon entry point (seed or client)
+├── web/                    # Discord-like responsive Web UI
+│   └── index.html          # Spaces, channels, DMs, file attachments, previews
+└── tests/                  # Automated unit and integration test suites
 ```
 
 ---
@@ -89,15 +80,26 @@ Wex-Chat is an uncompromising privacy-first communication protocol designed to e
 
 ### Compilation
 ```bash
-mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Debug ..
-make
+cmake -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
 ```
 
-### Running Tests
+### Running All 12 Automated Test Suites
 ```bash
-cd build
-ctest --output-on-failure
+ctest --test-dir build --output-on-failure
+```
+
+### Running the Daemon
+```bash
+# Run with Web UI on http://127.0.0.1:9000
+./build/wex_daemon --ws 9000 --port 9001 --nick Alice
+
+# Or run with a custom configuration file:
+./build/wex_daemon --config wex.conf
+
+# Or run as a headless Internet Seed & Relay router:
+./build/wex_daemon --seed --port 9001
+```
 ```
 
 ---
