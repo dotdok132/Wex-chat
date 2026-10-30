@@ -48,6 +48,10 @@ add_library(wex_core STATIC ${WEX_CORE_SOURCES})
 add_executable(wex_daemon src/main.c)
 target_link_libraries(wex_daemon wex_core)
 
+# Terminal CLI Client executable
+add_executable(wex_cli src/cli/wex_cli.c)
+target_link_libraries(wex_cli wex_core)
+
 # Automated unit & integration tests
 enable_testing()
 
@@ -110,3 +114,7 @@ add_test(NAME test_actions COMMAND test_actions)
 add_executable(test_e2e_full_stack tests/test_e2e_full_stack.c)
 target_link_libraries(test_e2e_full_stack wex_core)
 add_test(NAME test_e2e_full_stack COMMAND test_e2e_full_stack)
+
+add_executable(test_blob_e2ee tests/test_blob_e2ee.c)
+target_link_libraries(test_blob_e2ee wex_core)
+add_test(NAME test_blob_e2ee COMMAND test_blob_e2ee)

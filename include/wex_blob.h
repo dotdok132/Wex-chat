@@ -64,4 +64,13 @@ int wex_blob_load(const char *storage_dir, const uint8_t root_hash[WEX_BLOB_HASH
 char *wex_b64_encode(const uint8_t *data, size_t input_len);
 uint8_t *wex_b64_decode(const char *b64_str, size_t *out_len);
 
+/* E2EE Blob symmetric encryption (XChaCha20-Poly1305 with authenticated 24-byte nonce & 16-byte MAC) */
+int wex_blob_generate_key(uint8_t out_key[32]);
+int wex_blob_encrypt_payload(const uint8_t *plaintext, size_t plain_len,
+                             const uint8_t key[32],
+                             uint8_t **out_ciphertext, size_t *out_cipher_len);
+int wex_blob_decrypt_payload(const uint8_t *ciphertext, size_t cipher_len,
+                             const uint8_t key[32],
+                             uint8_t **out_plaintext, size_t *out_plain_len);
+
 #endif /* WEX_BLOB_H */

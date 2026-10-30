@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "wex_blob.h"
 #include "wex_persist.h"
+#include "wex_crypto.h"
 #include "../../vendor/monocypher/monocypher.h"
 
 #include <stdio.h>
@@ -278,4 +279,64 @@ uint8_t *wex_b64_decode(const char *b64_str, size_t *out_len) {
 
     *out_len = j;
     return out;
+}
+
+int wex_blob_generate_key(uint8_t out_key[32]) {
+    if (!out_key) return -1;
+    return wex_randombytes(out_key, 32);
+}
+
+int wex_blob_encrypt_payload(const uint8_t *plaintext, size_t plain_len,
+                             const uint8_t key[32],
+                             uint8_t **out_ciphertext, size_t *out_cipher_len) {
+    if (!key || (plain_len > 0 && !plaintext) || !out_ciphertext || !out_cipher_len) {
+        return -1;
+    }
+
+    size_t total_sz = 24 + 16 + plain_len;
+    uint8_t *buf = malloc(total_sz ? total_sz : 1);
+    if (!buf) return -1;
+
+    uint8_t *nonce = buf;
+    uint8_t *mac = buf + 24;
+    uint8_t *cipher = buf + 40;
+
+    if (wex_randombytes(nonce, 24) != 0) {
+        free(buf);
+        return -1;
+    }
+
+    crypto_aead_lock(cipher, mac, key, nonce, NULL, 0, plaintext, plain_len);
+
+    *out_ciphertext = buf;
+    *out_cipher_len = total_sz;
+    return 0;
+}
+
+int wex_blob_decrypt_payload(const uint8_t *ciphertext, size_t cipher_len,
+                             const uint8_t key[32],
+                             uint8_t **out_plaintext, size_t *out_plain_len) {
+    if (!key || !ciphertext || cipher_len < 40 || !out_plaintext || !out_plain_len) {
+        return -1;
+    }
+
+    size_t plain_len = cipher_len - 40;
+    uint8_t *plain = malloc(plain_len ? plain_len : 1);
+    if (!plain) return -1;
+
+    const uint8_t *nonce = ciphertext;
+    const uint8_t *mac = ciphertext + 24;
+    const uint8_t *cipher = ciphertext + 40;
+
+    if (crypto_aead_unlock(plain, mac, key, nonce, NULL, 0, cipher, plain_len) != 0) {
+        wex_clean(plain, plain_len);
+        free(plain);
+        *out_plaintext = NULL;
+        *out_plain_len = 0;
+        return -1; /* Forgery or wrong key */
+    }
+
+    *out_plaintext = plain;
+    *out_plain_len = plain_len;
+    return 0;
 }

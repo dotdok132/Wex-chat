@@ -181,6 +181,7 @@
     let currentDmPeerPk = null;
     let myNick = 'User';
     let myUdpPort = 9001;
+    let spacesCache = [];
     let peersCache = [];
     let openDms = new Set();
     let blobCache = {};
@@ -206,11 +207,14 @@
           document.getElementById('my-node-status').innerText = `UDP :${myUdpPort} | P2P`;
           
           if (data.spaces && data.spaces.length > 0) {
-            const sp = data.spaces[0];
-            currentSpaceId = sp.id;
-            document.getElementById('server-title').innerText = sp.name;
-            document.getElementById('space-avatar').innerText = sp.name.charAt(0).toUpperCase();
-            renderChannels(sp.channels);
+            spacesCache = data.spaces;
+            renderGuilds(data.spaces);
+            if (!currentSpaceId) {
+              const sp = data.spaces[0];
+              currentSpaceId = sp.id;
+              document.getElementById('server-title').innerText = sp.name;
+              renderChannels(sp.channels);
+            }
           }
           if (data.peers) {
             peersCache = data.peers;
@@ -230,6 +234,11 @@
           ws.send(JSON.stringify({ action: 'get_status' }));
         } else if (data.type === 'message') {
           appendMessage(data);
+          if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification(`${data.author} (${data.channel})`, { body: data.content });
+            } catch (e) {}
+          }
         } else if (data.type === 'reaction_updated') {
           const el = document.getElementById('reacts-' + data.target_sig);
           if (el) el.innerText = data.summary;
@@ -265,6 +274,37 @@
         document.getElementById('my-nickname').innerText = 'Переподключение...';
         setTimeout(connectWS, 1500);
       };
+    }
+
+    function renderGuilds(spaces) {
+      const container = document.getElementById('guilds-bar');
+      container.innerHTML = '';
+      spaces.forEach(sp => {
+        const div = document.createElement('div');
+        div.className = 'guild-icon' + (sp.id === currentSpaceId ? ' active' : '');
+        div.innerText = (sp.name || 'W').charAt(0).toUpperCase();
+        div.title = sp.name;
+        div.onclick = () => switchSpace(sp.id);
+        container.appendChild(div);
+      });
+      const addBtn = document.createElement('div');
+      addBtn.className = 'guild-icon add-btn';
+      addBtn.title = 'Создать новое сообщество';
+      addBtn.innerText = '+';
+      addBtn.onclick = createNewSpace;
+      container.appendChild(addBtn);
+    }
+
+    function switchSpace(spaceId) {
+      const sp = spacesCache.find(s => s.id === spaceId);
+      if (!sp) return;
+      currentSpaceId = sp.id;
+      document.getElementById('server-title').innerText = sp.name;
+      renderGuilds(spacesCache);
+      renderChannels(sp.channels);
+      if (sp.channels && sp.channels.length > 0) {
+        switchChannel(sp.channels[0]);
+      }
     }
 
     function renderChannels(channels) {
@@ -421,11 +461,23 @@
       const timeStr = new Date(msg.timestamp_ms || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
       const initial = (msg.author || '?').charAt(0).toUpperCase();
 
-      /* Parse attachment tag: [attachment:hash:filename:size:mimetype] */
+      /* Parse attachment tag: [attachment:hash:(key:)filename:size:mimetype] */
       let bodyHtml = escapeHtml(msg.content);
-      const attachMatch = msg.content.match(/\[attachment:([0-9a-f]{64}):([^:]+):([0-9]+):([^\]]+)\]/);
-      if (attachMatch) {
-        const [_, hash, fname, szStr, mtype] = attachMatch;
+      const e2eeAttachMatch = msg.content.match(/\[attachment:([0-9a-f]{64}):([0-9a-f]{64}):([^:]+):([0-9]+):([^\]]+)\]/);
+      const plainAttachMatch = msg.content.match(/\[attachment:([0-9a-f]{64}):([^:]+):([0-9]+):([^\]]+)\]/);
+      
+      if (e2eeAttachMatch) {
+        const [_, hash, e2eeKey, fname, szStr, mtype] = e2eeAttachMatch;
+        const sizeNum = parseInt(szStr, 10);
+        bodyHtml = `
+          <a class="attachment-card" onclick="downloadBlob('${hash}', '${escapeHtml(fname)}', '${mtype}')" title="End-to-End Encrypted File">
+            <span>🔐</span> <span>${escapeHtml(fname)}</span>
+            <span style="font-size:10px; background:var(--accent); color:#fff; border-radius:3px; padding:1px 4px;">E2EE</span>
+            <span style="font-size:11px; color:var(--text-muted)">(${formatBytes(sizeNum)})</span>
+          </a>
+        `;
+      } else if (plainAttachMatch) {
+        const [_, hash, fname, szStr, mtype] = plainAttachMatch;
         const sizeNum = parseInt(szStr, 10);
         if (mtype.startsWith('image/')) {
           bodyHtml = `

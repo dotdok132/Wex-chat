@@ -86,22 +86,24 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
 
-### Running All 15 Automated Test Suites
+### Running All 16 Automated Test Suites
 ```bash
 ctest --test-dir build --output-on-failure
 ```
 
-### Running the Daemon
+### Running the Daemon & Clients
 ```bash
-# Run with Web UI on http://127.0.0.1:9000
+# Run Wex daemon with Web UI on http://127.0.0.1:9000
 ./build/wex_daemon --ws 9000 --port 9001 --nick Alice
+
+# Run interactive Terminal CLI client (connects to local daemon)
+./build/wex_cli 9000
 
 # Or run with a custom configuration file:
 ./build/wex_daemon --config wex.conf
 
 # Or run as a headless Internet Seed & Relay router:
 ./build/wex_daemon --seed --port 9001
-```
 ```
 
 ---
