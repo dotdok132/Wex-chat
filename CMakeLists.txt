@@ -31,6 +31,7 @@ set(WEX_CORE_SOURCES
     src/models/wex_models.c
     src/models/wex_config.c
     src/models/wex_permissions.c
+    src/models/wex_actions.c
     src/net/wex_ws_server.c
     src/net/wex_p2p.c
     src/net/wex_nat.c
@@ -101,3 +102,7 @@ add_test(NAME test_voice COMMAND test_voice)
 add_executable(test_permissions tests/test_permissions.c)
 target_link_libraries(test_permissions wex_core)
 add_test(NAME test_permissions COMMAND test_permissions)
+
+add_executable(test_actions tests/test_actions.c)
+target_link_libraries(test_actions wex_core)
+add_test(NAME test_actions COMMAND test_actions)
