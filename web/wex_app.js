@@ -1,7 +1,7 @@
 /**
- * WEX // PROTOCOL — Frontend Controller & E2EE DM State Machine
+ * Wex-Chat — Friendly Consumer Messenger Controller
  * File: web/wex_app.js
- * Zero external dependencies. Designed for Desktop, Tablet Split-View, and Mobile Master-Detail.
+ * Clean, cozy, human-friendly UI with rounded chat bubbles and zero technical jargon.
  */
 
 (function () {
@@ -16,12 +16,12 @@
   let activeTab = 'dms'; // 'dms' | 'swarms' | 'net' | 'key'
   let activeChatMode = 'dm'; // 'dm' | 'swarm'
   let currentSpaceId = '';
-  let currentChannel = '';
+  let currentChannel = 'general';
   let currentDmPeerPk = null;
 
-  /* Local Node Identity & Telemetry */
-  let myNick = 'User';
-  let myStatus = 'Online';
+  /* Local Profile & Connection State */
+  let myNick = 'Пользователь';
+  let myStatus = 'В сети';
   let myUdpPort = 9001;
   let myPublicKey = '';
   let myX25519Key = '';
@@ -74,18 +74,16 @@
     return div.innerHTML;
   }
 
-  function shortKey(pk) {
-    if (!pk || pk.length < 16) return pk || 'unknown';
-    return pk.substring(0, 8) + '…' + pk.substring(pk.length - 6);
-  }
-
   function formatTimestamp(tsMs) {
     if (!tsMs) {
       const now = new Date();
       return now.toTimeString().substring(0, 5);
     }
     const d = new Date(Number(tsMs));
-    if (isNaN(d.getTime())) return 'сейчас';
+    if (isNaN(d.getTime())) {
+      const now = new Date();
+      return now.toTimeString().substring(0, 5);
+    }
     return d.toTimeString().substring(0, 5);
   }
 
@@ -152,9 +150,10 @@
       }
     }
 
+    const defaultNick = 'Друг ' + key.substring(0, 4).toUpperCase();
     const existing = contacts[key] || {
       public_key: key,
-      nickname: 'Peer-' + key.substring(0, 6),
+      nickname: defaultNick,
       ip: '',
       port: 0,
       online: false,
@@ -165,11 +164,16 @@
     };
 
     const updated = Object.assign({}, existing, patch || {}, { public_key: key });
-    if (!updated.nickname || updated.nickname === 'Anon' || updated.nickname.startsWith('Peer-')) {
+    if (
+      !updated.nickname ||
+      updated.nickname === 'Anon' ||
+      updated.nickname.startsWith('Peer-') ||
+      updated.nickname.startsWith('Друг ')
+    ) {
       if (patch && patch.nickname && patch.nickname !== 'Anon') {
         updated.nickname = patch.nickname;
-      } else if (!existing.nickname) {
-        updated.nickname = 'Peer-' + key.substring(0, 6);
+      } else if (!existing.nickname || existing.nickname.startsWith('Peer-')) {
+        updated.nickname = defaultNick;
       }
     }
     contacts[key] = updated;
@@ -185,7 +189,7 @@
       peersList.forEach((p) => {
         if (!p || !p.public_key) return;
         upsertContact(p.public_key, {
-          nickname: p.nickname || ('Peer-' + p.public_key.substring(0, 6)),
+          nickname: p.nickname || ('Друг ' + p.public_key.substring(0, 4).toUpperCase()),
           ip: p.ip || '',
           port: p.port || 0,
           online: true,
@@ -226,7 +230,7 @@
           }
         } else if (senderPk && (!myPublicKey || senderPk !== myPublicKey.toLowerCase())) {
           upsertContact(senderPk, {
-            nickname: m.author || ('Peer-' + senderPk.substring(0, 6))
+            nickname: m.author || ('Друг ' + senderPk.substring(0, 4).toUpperCase())
           });
         }
       });
@@ -387,43 +391,47 @@
 
     if (activeChatMode === 'dm' && currentDmPeerPk) {
       const c = contacts[currentDmPeerPk] || {
-        nickname: 'Peer-' + currentDmPeerPk.substring(0, 6),
+        nickname: 'Друг ' + currentDmPeerPk.substring(0, 4).toUpperCase(),
         public_key: currentDmPeerPk,
-        online: false,
-        use_relay: false
+        online: false
       };
 
-      if (prefixEl) prefixEl.textContent = 'E2EE // ЛС';
-      if (titleEl) titleEl.textContent = c.nickname || shortKey(currentDmPeerPk);
-
-      let routeLabel = `PK: ${shortKey(currentDmPeerPk)} // ОФЛАЙН-ОЧЕРЕДЬ QUAS (X25519)`;
-      if (c.online) {
-        routeLabel = c.use_relay
-          ? `ОНЛАЙН // DHT OVERLAY RELAY (${shortKey(currentDmPeerPk)})`
-          : `ОНЛАЙН // ПРЯМОЙ UDP P2P (${c.ip ? c.ip + ':' + c.port : shortKey(currentDmPeerPk)})`;
-      }
-      if (topicEl) topicEl.textContent = routeLabel;
-      if (inputEl) inputEl.placeholder = `Зашифрованное ЛС для ${c.nickname || shortKey(currentDmPeerPk)} (ChaCha20-Poly1305)...`;
+      if (prefixEl) prefixEl.textContent = '@';
+      if (titleEl) titleEl.textContent = c.nickname || 'Собеседник';
+      if (topicEl) topicEl.textContent = c && c.online ? 'В сети' : 'Личный чат';
+      if (inputEl) inputEl.placeholder = 'Написать сообщение...';
     } else {
       const sp = spacesCache.find((s) => s.id === currentSpaceId);
-      const spName = sp ? sp.name : 'Нет выбранной группы';
-      if (prefixEl) prefixEl.textContent = 'SWARM #';
+      const spName = sp ? sp.name : 'Уютное сообщество';
+      if (prefixEl) prefixEl.textContent = '#';
       if (titleEl) titleEl.textContent = currentChannel;
-      if (topicEl) topicEl.textContent = `${spName} // ED25519 SIGNED MESH`;
-      if (inputEl) inputEl.placeholder = `Сообщение в #${currentChannel}...`;
+      if (topicEl) topicEl.textContent = spName;
+      if (inputEl) inputEl.placeholder = 'Написать сообщение...';
     }
   }
 
-  /* ======================== PURE-CANVAS 21x21 KEY MATRIX / QR RENDERER ======================== */
-  function drawFinderPattern(ctx, ox, oy, cellSize, fgColor, bgColor) {
-    for (let r = 0; r < 7; r++) {
-      for (let c = 0; c < 7; c++) {
-        const isBorder = r === 0 || r === 6 || c === 0 || c === 6;
-        const isInner = r >= 2 && r <= 4 && c >= 2 && c <= 4;
-        ctx.fillStyle = (isBorder || isInner) ? fgColor : bgColor;
-        ctx.fillRect((ox + c) * cellSize, (oy + r) * cellSize, cellSize, cellSize);
-      }
-    }
+  /* ======================== PASTEL-PURPLE ROUNDED QR / KEY CANVAS RENDERER ======================== */
+  function drawRoundedRect(ctx, x, y, w, h, r) {
+    const radius = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawFinderPattern(ctx, ox, oy, cellSize, accentColor, darkColor, bgColor) {
+    ctx.fillStyle = accentColor;
+    drawRoundedRect(ctx, ox * cellSize, oy * cellSize, 7 * cellSize, 7 * cellSize, cellSize * 1.6);
+
+    ctx.fillStyle = bgColor;
+    drawRoundedRect(ctx, (ox + 1) * cellSize, (oy + 1) * cellSize, 5 * cellSize, 5 * cellSize, cellSize * 1.1);
+
+    ctx.fillStyle = darkColor;
+    drawRoundedRect(ctx, (ox + 2) * cellSize, (oy + 2) * cellSize, 3 * cellSize, 3 * cellSize, cellSize * 0.8);
   }
 
   function renderKeyMatrixCanvas(canvasOrId, hexKey) {
@@ -438,30 +446,33 @@
 
     const gridSize = 21;
     const size = canvas.width || 168;
-    const padding = 8;
+    const padding = 10;
     const innerSize = size - padding * 2;
     const cellSize = Math.floor(innerSize / gridSize);
     const offset = Math.floor((size - cellSize * gridSize) / 2);
 
     const ctx = canvas.getContext('2d');
-    const bgColor = '#0a0b0d';
-    const fgPrimary = '#eceef2';
-    const fgAccent = '#10b981';
+    const bgColor = '#f5f3ff';
+    const fgPrimary = '#181622';
+    const fgAccent = '#7c6ae6';
 
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawRoundedRect(ctx, 0, 0, canvas.width, canvas.height, 14);
 
     ctx.save();
     ctx.translate(offset, offset);
 
-    drawFinderPattern(ctx, 0, 0, cellSize, fgAccent, bgColor);
-    drawFinderPattern(ctx, gridSize - 7, 0, cellSize, fgAccent, bgColor);
-    drawFinderPattern(ctx, 0, gridSize - 7, cellSize, fgAccent, bgColor);
+    drawFinderPattern(ctx, 0, 0, cellSize, fgAccent, fgPrimary, bgColor);
+    drawFinderPattern(ctx, gridSize - 7, 0, cellSize, fgAccent, fgPrimary, bgColor);
+    drawFinderPattern(ctx, 0, gridSize - 7, cellSize, fgAccent, fgPrimary, bgColor);
 
     for (let i = 8; i < gridSize - 8; i++) {
-      ctx.fillStyle = (i % 2 === 0) ? fgPrimary : bgColor;
-      ctx.fillRect(i * cellSize, 6 * cellSize, cellSize, cellSize);
-      ctx.fillRect(6 * cellSize, i * cellSize, cellSize, cellSize);
+      if (i % 2 === 0) {
+        ctx.fillStyle = fgAccent;
+        drawRoundedRect(ctx, i * cellSize + 0.5, 6 * cellSize + 0.5, cellSize - 1, cellSize - 1, cellSize * 0.35);
+        drawRoundedRect(ctx, 6 * cellSize + 0.5, i * cellSize + 0.5, cellSize - 1, cellSize - 1, cellSize * 0.35);
+      }
     }
 
     let bitIdx = 0;
@@ -479,8 +490,15 @@
         const bit = ((byteA ^ byteB) >> shift) & 1;
 
         if (bit === 1) {
-          ctx.fillStyle = ((r + c) % 5 === 0) ? fgAccent : fgPrimary;
-          ctx.fillRect(c * cellSize, r * cellSize, cellSize - 0.5, cellSize - 0.5);
+          ctx.fillStyle = ((r + c) % 3 === 0) ? fgAccent : fgPrimary;
+          drawRoundedRect(
+            ctx,
+            c * cellSize + 0.5,
+            r * cellSize + 0.5,
+            cellSize - 1,
+            cellSize - 1,
+            cellSize * 0.4
+          );
         }
         bitIdx++;
       }
@@ -497,7 +515,7 @@
     });
   }
 
-  /* ======================== HARDWARE-STYLE WEB AUDIO SYNTHESIZER ======================== */
+  /* ======================== SOFT AUDIO NOTIFICATION ======================== */
   function playIncomingDmTick() {
     try {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -513,18 +531,18 @@
       const gain = audioCtx.createGain();
 
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(1046.5, now);
-      osc.frequency.exponentialRampToValueAtTime(1567.98, now + 0.045);
+      osc.frequency.setValueAtTime(587.33, now); // D5 soft chime
+      osc.frequency.exponentialRampToValueAtTime(880.0, now + 0.065); // A5 warm harmonic
 
       gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(0.08, now + 0.008);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.085);
+      gain.gain.exponentialRampToValueAtTime(0.06, now + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
 
       osc.connect(gain);
       gain.connect(audioCtx.destination);
 
       osc.start(now);
-      osc.stop(now + 0.09);
+      osc.stop(now + 0.12);
     } catch (e) {}
   }
 
@@ -542,12 +560,12 @@
     if (!text) return;
     if (window.AndroidBridge && typeof window.AndroidBridge.copyText === 'function') {
       window.AndroidBridge.copyText(String(text));
-      showToast(toastMsg || 'СКОПИРОВАНО В БУФЕР');
+      showToast(toastMsg || 'Скопировано!');
       return;
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(String(text)).then(() => {
-        showToast(toastMsg || 'СКОПИРОВАНО В БУФЕР');
+        showToast(toastMsg || 'Скопировано!');
       }).catch(() => fallbackCopy(String(text), toastMsg));
     } else {
       fallbackCopy(String(text), toastMsg);
@@ -563,7 +581,7 @@
     ta.select();
     try {
       document.execCommand('copy');
-      showToast(toastMsg || 'СКОПИРОВАНО В БУФЕР');
+      showToast(toastMsg || 'Скопировано!');
     } catch (e) {}
     document.body.removeChild(ta);
   }
@@ -575,7 +593,7 @@
       const clip = window.AndroidBridge.pasteText();
       if (clip) {
         el.value = String(clip).trim();
-        showToast('ВСТАВЛЕНО ИЗ БУФЕРА');
+        showToast('Вставлено из буфера');
         return;
       }
     }
@@ -584,7 +602,7 @@
         const clip = await navigator.clipboard.readText();
         if (clip) {
           el.value = clip.trim();
-          showToast('ВСТАВЛЕНО ИЗ БУФЕРА');
+          showToast('Вставлено из буфера');
           return;
         }
       } catch (e) {}
@@ -598,9 +616,9 @@
     if (window.AndroidBridge && typeof window.AndroidBridge.shareText === 'function') {
       window.AndroidBridge.shareText(link);
     } else if (navigator.share) {
-      navigator.share({ title: 'WEX // Ключ и инвайт', text: link }).catch(() => {});
+      navigator.share({ title: 'Приглашение в Wex-Chat', text: link }).catch(() => {});
     } else {
-      copyTextWithToast(link, 'URI СКОПИРОВАН В БУФЕР');
+      copyTextWithToast(link, 'Ссылка-приглашение скопирована!');
     }
   }
 
@@ -611,7 +629,6 @@
 
     const list = Object.values(contacts);
 
-    // Update badge count
     const totalUnread = list.reduce((acc, c) => acc + (c.unread || 0), 0);
     setText(['badge-dms'], String(totalUnread > 0 ? totalUnread : list.length));
 
@@ -626,7 +643,7 @@
     if (list.length === 0) {
       container.innerHTML = `
         <div class="empty-list-hint">
-          Нет активных диалогов. Нажмите «+ ДОБАВИТЬ КОНТАКТ / КЛЮЧ» выше и вставьте 64-значный Ed25519 ключ собеседника или инвайт wex:// для прямого E2EE ЛС.
+          Здесь пока нет чатов. Нажмите «Добавить друга» выше, чтобы начать общение!
         </div>
       `;
       return;
@@ -639,15 +656,15 @@
       item.className = 'peer-item channel-item' + (isActive ? ' active' : '');
       item.setAttribute('data-pk', c.public_key);
 
-      const dotClass = c.online ? (c.use_relay ? 'amber' : 'online') : 'offline';
-      const transportTag = c.online ? (c.use_relay ? 'RELAY' : 'DIRECT') : 'QUAS';
+      const dotClass = c.online ? 'online' : 'offline';
+      const statusBadge = c.online ? 'В сети' : 'Не в сети';
       const preview = c.last_msg
-        ? (c.last_msg.length > 34 ? c.last_msg.substring(0, 34) + '…' : c.last_msg)
-        : shortKey(c.public_key);
+        ? (c.last_msg.length > 36 ? c.last_msg.substring(0, 36) + '…' : c.last_msg)
+        : (c.online ? 'На связи' : 'Нажмите, чтобы написать');
 
       item.innerHTML = `
         <div class="peer-left">
-          <span class="peer-dot ${dotClass}" style="background:${c.online ? (c.use_relay ? '#f59e0b' : '#10b981') : '#4a5160'};"></span>
+          <span class="peer-dot ${dotClass}"></span>
           <div class="peer-meta">
             <span class="peer-name">${escapeHtml(c.nickname)}</span>
             <span class="peer-sub">${escapeHtml(preview)}</span>
@@ -655,8 +672,8 @@
         </div>
         <div class="item-right">
           ${c.unread > 0
-            ? `<span class="crypto-tag" style="background:#10b981; color:#0a0b0d; font-weight:700;">+${c.unread}</span>`
-            : `<span class="crypto-tag">${transportTag}</span>`
+            ? `<span class="crypto-tag unread">+${c.unread}</span>`
+            : `<span class="crypto-tag">${statusBadge}</span>`
           }
         </div>
       `;
@@ -672,7 +689,7 @@
     container.innerHTML = '';
 
     if (!peersCache || peersCache.length === 0) {
-      container.innerHTML = '<div class="empty-list-hint">Радиомаяк LAN (UDP :9009) и таблица Kademlia DHT ожидают отклика узлов...</div>';
+      container.innerHTML = '<div class="empty-list-hint">Ищем друзей поблизости и в сети...</div>';
       return;
     }
 
@@ -681,13 +698,13 @@
       item.className = 'peer-item';
       item.innerHTML = `
         <div class="peer-left">
-          <span class="peer-dot online" style="background:#10b981;"></span>
+          <span class="peer-dot online"></span>
           <div class="peer-meta">
-            <span class="peer-name">${escapeHtml(p.nickname || 'Node')}</span>
-            <span class="peer-sub">${escapeHtml(p.ip || '')}:${p.port || ''} // ${shortKey(p.public_key)}</span>
+            <span class="peer-name">${escapeHtml(p.nickname || 'Друг')}</span>
+            <span class="peer-sub">В сети • На связи</span>
           </div>
         </div>
-        <span class="crypto-tag">E2EE ЛС →</span>
+        <span class="crypto-tag">Написать</span>
       `;
       item.onclick = () => {
         if (p.public_key) {
@@ -709,8 +726,8 @@
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'swarm-pill guild-icon' + (active ? ' active' : '');
-      btn.textContent = sp.name || 'Swarm';
-      btn.title = `${sp.name} (${shortKey(sp.id)})`;
+      btn.textContent = sp.name || 'Сообщество';
+      btn.title = sp.name || 'Сообщество';
       btn.onclick = () => switchSpace(sp.id);
       container.appendChild(btn);
     });
@@ -729,8 +746,8 @@
     container.innerHTML = '';
 
     const activeSp = spacesCache.find((s) => s.id === currentSpaceId) || spacesCache[0];
-    setText(['server-title'], activeSp ? activeSp.name : 'Нет выбранной группы');
-    setText(['active-swarm-id-label'], activeSp ? `SWARM ID: ${shortKey(activeSp.id)}` : 'P2P MESH SWARM');
+    setText(['server-title'], activeSp ? activeSp.name : 'Моё сообщество');
+    setText(['active-swarm-id-label'], 'Общие комнаты и каналы');
 
     const chs = (activeSp && Array.isArray(activeSp.channels)) ? activeSp.channels : ['general'];
     chs.forEach((ch) => {
@@ -745,32 +762,23 @@
 
   function renderNetworkTelemetry() {
     const isOnline = Boolean(ws && ws.readyState === WebSocket.OPEN);
-    setText(['net-daemon-state'], isOnline ? 'ONLINE // C99 P2P' : 'RECONNECTING');
-    setText(['net-udp-port'], `UDP :${myUdpPort}`);
-    setText(['net-wan-endpoint'], myWanEndpoint || 'Auto NAT Hole-Punch / DHT Relay');
+    setText(['net-daemon-state'], isOnline ? 'Подключено' : 'Подключение...');
+    setText(['net-udp-port'], isOnline ? 'Активно' : 'Ожидание');
+    setText(['net-wan-endpoint'], myWanEndpoint ? 'Прямое соединение' : 'Автоматический маршрут');
     setText(['net-dht-count'], String(myDhtCount));
-    setText(['net-quas-count'], `${myOfflineShards} SHARDS`);
+    setText(['net-quas-count'], myOfflineShards > 0 ? `${myOfflineShards} в очереди` : 'Все доставлены');
 
     const pulseDot = getEl('node-pulse-indicator');
     if (pulseDot) {
-      pulseDot.style.background = isOnline ? '#10b981' : '#f59e0b';
+      pulseDot.style.background = isOnline ? '#34d399' : '#fbbf24';
     }
 
     const diagLines = [
-      `DAEMON    : ${isOnline ? 'ACTIVE (C99 Native Engine)' : 'RECONNECTING'}`,
-      `LOCAL UDP : 0.0.0.0:${myUdpPort}`,
-      `WAN STUN  : ${myWanEndpoint || 'NAT Traversal / Overlay Relay'}`,
-      `KADEMLIA  : ${myDhtCount} DHT nodes | ${peersCache.length} direct peers | ${myOfflineShards} Quas shards`,
-      `ED25519   : ${myPublicKey}`,
-      `X25519    : ${myX25519Key || 'Derived from Ed25519'}`
+      `Состояние: ${isOnline ? 'В сети • На связи' : 'Подключение...'}`,
+      `Друзей онлайн: ${peersCache.length}`,
+      `Узлов в общей сети: ${myDhtCount}`,
+      `Ожидают доставки: ${myOfflineShards}`
     ];
-
-    if (dhtNodesCache && dhtNodesCache.length > 0) {
-      diagLines.push('--- DHT ROUTING TABLE ---');
-      dhtNodesCache.slice(0, 8).forEach((n) => {
-        diagLines.push(`[B${n.bucket}] ${shortKey(n.id)} -> ${n.ip}:${n.port}`);
-      });
-    }
 
     setText(['profile-diag-box'], diagLines.join('\n'));
   }
@@ -778,13 +786,16 @@
   function renderIdentityPanel() {
     window.myPublicKey = myPublicKey;
     setText(['my-nickname'], myNick);
-    setText(['my-avatar'], (myNick || 'W').charAt(0).toUpperCase());
-    setText(['my-node-status'], myWanEndpoint
-      ? `WAN ${myWanEndpoint} // DHT:${myDhtCount}`
-      : `UDP :${myUdpPort} // DHT:${myDhtCount}`);
+    setText(['my-avatar'], (myNick || 'Я').charAt(0).toUpperCase());
 
-    const inviteUri = myInviteUri || (myPublicKey ? `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}&pk=${myPublicKey}` : 'wex://join/...');
-    setText(['key-pubkey-display', 'invite-pk-box', 'identity-pk-box'], myPublicKey || 'Генерация...');
+    const isConnected = Boolean(ws && ws.readyState === WebSocket.OPEN);
+    const friendlyStatus = !isConnected
+      ? 'Подключение...'
+      : (peersCache.length > 0 ? `В сети • Друзей онлайн: ${peersCache.length}` : 'В сети • На связи');
+    setText(['my-node-status'], friendlyStatus);
+
+    const inviteUri = myInviteUri || (myPublicKey ? `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}&pk=${myPublicKey}` : 'Загрузка...');
+    setText(['key-pubkey-display', 'invite-pk-box', 'identity-pk-box'], myPublicKey || 'Загрузка...');
     setText(['invite-link-box', 'identity-invite-box'], inviteUri);
 
     const nickInput = getEl('profile-nick-input');
@@ -797,7 +808,7 @@
     }
   }
 
-  /* ======================== MESSAGE FEED & E2EE RENDERING ======================== */
+  /* ======================== MESSAGE FEED RENDERING ======================== */
   function messageMatchesCurrentConversation(msg) {
     if (!msg) return false;
     const msgCh = msg.channel || 'general';
@@ -832,20 +843,19 @@
     if (filtered.length === 0) {
       if (activeChatMode === 'dm' && currentDmPeerPk) {
         const c = contacts[currentDmPeerPk];
-        const name = c ? c.nickname : shortKey(currentDmPeerPk);
+        const name = c ? c.nickname : 'Собеседник';
         feed.innerHTML = `
           <div class="empty-state">
-            <span class="empty-state-tag">X25519 + CHACHA20-POLY1305 // E2EE ЛС</span>
-            <h3>Личный диалог: ${escapeHtml(name)}</h3>
-            <p style="font-family:var(--font-mono, monospace); font-size:11px; word-break:break-all;">PK: ${escapeHtml(currentDmPeerPk)}</p>
-            <p>Сообщения шифруются сквозным ключом X25519. Если собеседник сейчас офлайн, зашифрованный пакет сохраняется в Quas Store-and-Forward и доставляется при его появлении в сети.</p>
+            <span class="empty-state-tag">Личный чат</span>
+            <h3>Начните диалог с ${escapeHtml(name)}</h3>
+            <p>Напишите первое сообщение ниже. Даже если собеседник сейчас не в сети, сообщение бережно сохранится и дойдет, как только он появится.</p>
           </div>`;
       } else {
         feed.innerHTML = `
           <div class="empty-state">
-            <span class="empty-state-tag">ED25519 SIGNED SWARM</span>
-            <h3>Канал #${escapeHtml(currentChannel)}</h3>
-            <p>Сообщения подписываются ключом Ed25519 и синхронизируются напрямую между участниками сварм-канала без центральных серверов.</p>
+            <span class="empty-state-tag">Комната сообщества</span>
+            <h3>Добро пожаловать в #${escapeHtml(currentChannel)}</h3>
+            <p>Здесь пока тихо. Напишите первое сообщение или поделитесь ссылкой-приглашением с друзьями.</p>
           </div>`;
       }
       return;
@@ -879,19 +889,11 @@
     const isMine = (msg.author === myNick) || (myPublicKey && msg.author_pk && msg.author_pk.toLowerCase() === myPublicKey.toLowerCase());
     if (isMine) group.classList.add('mine');
 
-    const initial = (msg.author || 'U').charAt(0).toUpperCase();
-    const isDmMsg = (msg.channel && msg.channel.startsWith('dm:')) || msg.encrypted;
-
-    const verifiedBadge = (msg.verified !== false)
-      ? `<span class="verified-badge">ED25519 ✓</span>`
-      : '';
-    const e2eeBadge = isDmMsg
-      ? `<span class="e2ee-badge">CHACHA20 E2EE</span>`
-      : '';
+    const initial = (msg.author || 'Д').charAt(0).toUpperCase();
 
     let contentHtml = escapeHtml(msg.content || '');
     if (msg.edited) {
-      contentHtml += ' <span style="font-size:11px; color:#7d8594;">(ред.)</span>';
+      contentHtml += ' <span style="font-size:11px; opacity:0.75;">(изм.)</span>';
     }
 
     const rawContent = msg.content || '';
@@ -901,7 +903,7 @@
       if (closeIdx > prefixLen) {
         const meta = rawContent.substring(prefixLen, closeIdx).split(':');
         const hash = meta[0];
-        const fname = meta[1] || 'file.bin';
+        const fname = meta[1] || 'file';
         const fsize = Number(meta[2] || 0);
         const mime = meta[3] || 'application/octet-stream';
         const isImg = mime.startsWith('image/');
@@ -915,7 +917,7 @@
 
         contentHtml = `
           <div class="attachment-card" onclick="downloadBlobAttachment('${escapeHtml(hash)}', '${escapeHtml(fname)}', '${escapeHtml(mime)}')">
-            <span>[BLOB] <strong>${escapeHtml(fname)}</strong> (${Math.max(1, Math.round(fsize / 1024))} KB) — Скачать</span>
+            <span>Файл: <strong>${escapeHtml(fname)}</strong> (${Math.max(1, Math.round(fsize / 1024))} КБ) — Скачать</span>
           </div>
           ${isImg ? `<div class="attachment-preview"><img id="img-${escapeHtml(hash)}" ${imgSrc} ${imgDisplay}/></div>` : ''}
         `;
@@ -928,19 +930,17 @@
       <div class="msg-avatar">${escapeHtml(initial)}</div>
       <div class="msg-body">
         <div class="msg-meta">
-          <span class="msg-author">${escapeHtml(msg.author || 'Anon')}</span>
-          ${verifiedBadge}
-          ${e2eeBadge}
+          <span class="msg-author">${escapeHtml(msg.author || 'Собеседник')}</span>
           <span class="msg-time">${escapeHtml(timeStr)}</span>
         </div>
         <div class="msg-content" id="content-${escapeHtml(sig)}">${contentHtml}</div>
         <div class="reaction-bar" id="reacts-${escapeHtml(sig)}">${escapeHtml(msg.reactions || '')}</div>
         <div class="msg-actions">
           <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', '+1')">+1</button>
-          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', 'ACK')">ACK</button>
-          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', '🔥')">🔥</button>
-          ${isMine ? `<button class="action-btn" onclick="promptEditMessage('${escapeHtml(sig)}')">EDIT</button>` : ''}
-          ${isMine ? `<button class="action-btn" onclick="deleteMessage('${escapeHtml(sig)}')">DEL</button>` : ''}
+          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', 'Нравится')">Нравится</button>
+          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', 'Класс')">Класс</button>
+          ${isMine ? `<button class="action-btn" onclick="promptEditMessage('${escapeHtml(sig)}')">Изменить</button>` : ''}
+          ${isMine ? `<button class="action-btn" onclick="deleteMessage('${escapeHtml(sig)}')">Удалить</button>` : ''}
         </div>
       </div>
     `;
@@ -953,7 +953,7 @@
   function addContactOrConnect(rawTarget, customNick) {
     const parsed = parseTargetInput(rawTarget);
     if (!parsed.raw) {
-      showToast('ВВЕДИТЕ PUBLIC KEY (64 HEX), WEX:// ИЛИ IP:PORT');
+      showToast('Вставьте код друга или ссылку-приглашение');
       return;
     }
 
@@ -967,7 +967,7 @@
     if (parsed.pk) {
       const nick = (customNick && customNick.trim())
         ? customNick.trim()
-        : (contacts[parsed.pk] ? contacts[parsed.pk].nickname : ('Peer-' + parsed.pk.substring(0, 6)));
+        : (contacts[parsed.pk] ? contacts[parsed.pk].nickname : ('Друг ' + parsed.pk.substring(0, 4).toUpperCase()));
 
       upsertContact(parsed.pk, {
         nickname: nick,
@@ -977,10 +977,10 @@
       selectTab('dms');
       openDmConversation(parsed.pk);
       closeModals();
-      showToast('КОНТАКТ ДОБАВЛЕН // E2EE ЛС ОТКРЫТО');
+      showToast('Чат с другом открыт!');
     } else {
       closeModals();
-      showToast('ЗАПРОС НА ПОДКЛЮЧЕНИЕ ОТПРАВЛЕН');
+      showToast('Подключаемся к другу...');
     }
   }
 
@@ -999,7 +999,7 @@
     if (!text) return;
 
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      showToast('ОЖИДАНИЕ ЛОКАЛЬНОГО ДЕМОНА...');
+      showToast('Подождите секунду, идет подключение...');
       return;
     }
 
@@ -1051,7 +1051,7 @@
       openDmConversation(peerOrPk);
     } else if (peerOrPk.public_key) {
       upsertContact(peerOrPk.public_key, {
-        nickname: peerOrPk.nickname || ('Peer-' + peerOrPk.public_key.substring(0, 6)),
+        nickname: peerOrPk.nickname || ('Друг ' + peerOrPk.public_key.substring(0, 4).toUpperCase()),
         ip: peerOrPk.ip || '',
         port: peerOrPk.port || 0,
         online: true
@@ -1067,7 +1067,7 @@
     const newNick = input.value.trim();
     if (newNick && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: 'set_profile', nickname: newNick, status: 'Online' }));
-      showToast('ПСЕВДОНИМ СОХРАНЕН');
+      showToast('Ваше имя сохранено!');
     }
     closeModals();
   }
@@ -1084,7 +1084,7 @@
 
   function exportMasterSeed() {
     if (myExportedSeed) {
-      copyTextWithToast(myExportedSeed, 'MASTER SEED СКОПИРОВАН');
+      copyTextWithToast(myExportedSeed, 'Резервный код скопирован!');
       return;
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1100,13 +1100,13 @@
     const input = getEl('seed-import-input', 'import-seed-input');
     const seedHex = (seedHexArg || (input ? input.value : '')).trim();
     if (!isValidHex64(seedHex)) {
-      showToast('ВВЕДИТЕ КОРРЕКТНЫЙ 64-HEX MASTER SEED');
+      showToast('Пожалуйста, вставьте 64-значный резервный код');
       return;
     }
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: 'import_secret', seed_hex: seedHex }));
       if (input) input.value = '';
-      showToast('MASTER SEED ИМПОРТИРОВАН');
+      showToast('Профиль успешно восстановлен!');
     }
   }
 
@@ -1117,7 +1117,7 @@
   function triggerLanBeacon() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: 'lan_beacon' }));
-      showToast('LAN BEACON ОТПРАВЛЕН (UDP :9009)');
+      showToast('Ищем друзей в локальной сети...');
     }
   }
 
@@ -1128,14 +1128,14 @@
   function triggerStunProbe() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: 'stun_probe' }));
-      showToast('STUN PROBE ЗАПУЩЕН...');
+      showToast('Обновляем подключение к сети...');
     }
   }
 
   function triggerPullOffline() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: 'pull_offline' }));
-      showToast('СИНХРОНИЗАЦИЯ QUAS...');
+      showToast('Проверяем новые сообщения...');
     }
   }
 
@@ -1144,7 +1144,7 @@
     const file = e && e.target && e.target.files ? e.target.files[0] : null;
     if (!file) return;
     if (file.size > 2 * 1024 * 1024) {
-      showToast('МАКС. РАЗМЕР ФАЙЛА: 2 МБ');
+      showToast('Максимальный размер файла — 2 МБ');
       return;
     }
     const reader = new FileReader();
@@ -1159,7 +1159,7 @@
           channel: currentChannel,
           data_base64: b64
         }));
-        showToast('ОТПРАВКА P2P BLOB...');
+        showToast('Отправляем файл...');
       }
     };
     reader.readAsDataURL(file);
@@ -1170,11 +1170,11 @@
     if (blobCache[hash]) {
       const a = document.createElement('a');
       a.href = `data:${mime || 'application/octet-stream'};base64,${blobCache[hash]}`;
-      a.download = filename || 'attachment.bin';
+      a.download = filename || 'file';
       a.click();
     } else if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ action: 'get_blob', hash: hash }));
-      showToast('ЗАГРУЗКА БЛОБА ИЗ P2P...');
+      showToast('Загружаем файл...');
     }
   }
 
@@ -1190,7 +1190,7 @@
   function promptEditMessage(targetSig) {
     if (!targetSig) return;
     const el = document.getElementById('content-' + targetSig);
-    const oldText = el ? el.textContent.replace(' (ред.)', '') : '';
+    const oldText = el ? el.textContent.replace(' (изм.)', '').replace(' (ред.)', '') : '';
     openInputModal('edit_message', targetSig, oldText);
   }
 
@@ -1200,7 +1200,7 @@
       action: 'delete_message',
       target_sig: targetSig
     }));
-    showToast('ПАКЕТ УДАЛЕН');
+    showToast('Сообщение удалено');
   }
 
   async function toggleVoiceConnect(channel) {
@@ -1313,22 +1313,22 @@
     const fieldEl = getEl('modal-input-field');
 
     if (actionType === 'create_space') {
-      if (titleEl) titleEl.textContent = 'НОВЫЙ СВАРМ // СООБЩЕСТВО';
-      if (labelEl) labelEl.textContent = 'НАЗВАНИЕ СВАРМА';
+      if (titleEl) titleEl.textContent = 'Новое сообщество';
+      if (labelEl) labelEl.textContent = 'Название сообщества';
       if (fieldEl) {
-        fieldEl.placeholder = 'Например: Core Dev Swarm';
+        fieldEl.placeholder = 'Например: Друзья и близкие';
         fieldEl.value = '';
       }
     } else if (actionType === 'create_channel') {
-      if (titleEl) titleEl.textContent = 'НОВЫЙ КАНАЛ В СВАРМЕ';
-      if (labelEl) labelEl.textContent = 'ИМЯ КАНАЛА';
+      if (titleEl) titleEl.textContent = 'Новая комната';
+      if (labelEl) labelEl.textContent = 'Название комнаты';
       if (fieldEl) {
-        fieldEl.placeholder = 'Например: architecture';
+        fieldEl.placeholder = 'Например: общение';
         fieldEl.value = '';
       }
     } else if (actionType === 'edit_message') {
-      if (titleEl) titleEl.textContent = 'РЕДАКТИРОВАТЬ ПАКЕТ';
-      if (labelEl) labelEl.textContent = 'НОВЫЙ ТЕКСТ (ПОДПИСЬ ED25519)';
+      if (titleEl) titleEl.textContent = 'Изменить сообщение';
+      if (labelEl) labelEl.textContent = 'Текст сообщения';
       if (fieldEl) {
         fieldEl.placeholder = '';
         fieldEl.value = initialValue || '';
@@ -1352,10 +1352,10 @@
 
     if (pendingModalAction === 'create_space') {
       ws.send(JSON.stringify({ action: 'create_space', name: val }));
-      showToast('СВАРМ СОЗДАН');
+      showToast('Сообщество создано!');
     } else if (pendingModalAction === 'create_channel') {
       ws.send(JSON.stringify({ action: 'create_channel', name: val }));
-      showToast('КАНАЛ СОЗДАН');
+      showToast('Комната создана!');
     } else if (pendingModalAction === 'edit_message' && pendingTargetSig) {
       ws.send(JSON.stringify({ action: 'edit_message', target_sig: pendingTargetSig, text: val }));
     }
@@ -1377,8 +1377,8 @@
 
     if (data.type === 'status') {
       if (data.identity) {
-        myNick = data.identity.nickname || 'User';
-        myStatus = data.identity.status || 'Online';
+        myNick = data.identity.nickname || 'Пользователь';
+        myStatus = data.identity.status || 'В сети';
         myUdpPort = data.identity.udp_port || 9001;
         myPublicKey = data.identity.public_key || '';
         window.myPublicKey = myPublicKey;
@@ -1433,7 +1433,7 @@
         const vBadge = getEl('voice-badge');
         if (vBar) vBar.classList.toggle('active', voiceConnected);
         if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
-        if (vBadge) vBadge.textContent = voiceConnected ? 'АКТИВЕН' : 'ВОЙТИ';
+        if (vBadge) vBadge.textContent = voiceConnected ? 'На связи' : 'Войти';
       }
       return;
     }
@@ -1494,7 +1494,7 @@
     if (data.type === 'secret_exported') {
       myExportedSeed = data.seed_hex || '';
       setText(['seed-hex-box', 'exported-seed-box', 'master-seed-box'], myExportedSeed);
-      copyTextWithToast(myExportedSeed, 'MASTER SEED (64 HEX) СКОПИРОВАН');
+      copyTextWithToast(myExportedSeed, 'Резервный код скопирован!');
       return;
     }
 
@@ -1506,15 +1506,15 @@
 
     if (data.type === 'message_edited') {
       const el = document.getElementById('content-' + data.target_sig);
-      if (el) el.textContent = (data.content || '') + ' (ред.)';
+      if (el) el.textContent = (data.content || '') + ' (изм.)';
       return;
     }
 
     if (data.type === 'message_deleted') {
       const el = document.getElementById('content-' + data.target_sig);
       if (el) {
-        el.textContent = '[Пакет удален автором]';
-        el.style.color = '#7d8594';
+        el.textContent = 'Сообщение удалено';
+        el.style.opacity = '0.6';
       }
       return;
     }
@@ -1526,7 +1526,7 @@
       const vBadge = getEl('voice-badge');
       if (vBar) vBar.classList.toggle('active', voiceConnected);
       if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
-      if (vBadge) vBadge.textContent = voiceConnected ? 'АКТИВЕН' : 'ВОЙТИ';
+      if (vBadge) vBadge.textContent = voiceConnected ? 'На связи' : 'Войти';
       return;
     }
 
@@ -1576,7 +1576,7 @@
     };
 
     ws.onclose = () => {
-      setText(['my-node-status'], 'RECONNECTING...');
+      setText(['my-node-status'], 'Подключение...');
       renderNetworkTelemetry();
       reconnectTimer = setTimeout(connectWS, 1200);
     };

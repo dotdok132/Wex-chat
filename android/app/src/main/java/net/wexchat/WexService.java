@@ -70,8 +70,8 @@ public class WexService extends Service {
         }
 
         Notification notification = builder
-            .setContentTitle("Wex-Chat P2P Active")
-            .setContentText("Sovereign encrypted mesh connected in background")
+            .setContentTitle("Wex-Chat")
+            .setContentText("На связи в фоновом режиме")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

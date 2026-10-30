@@ -132,8 +132,8 @@ public class MainActivity extends Activity {
             Window window = getWindow();
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setStatusBarColor(Color.parseColor("#0a0b0d"));
-            window.setNavigationBarColor(Color.parseColor("#0a0b0d"));
+            window.setStatusBarColor(Color.parseColor("#181622"));
+            window.setNavigationBarColor(Color.parseColor("#181622"));
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         }
 
@@ -146,7 +146,7 @@ public class MainActivity extends Activity {
         }
 
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.parseColor("#0a0b0d"));
+        webView.setBackgroundColor(Color.parseColor("#181622"));
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         setContentView(webView);
 
