@@ -1,0 +1,22 @@
+# ====================================================
+# Wex-Chat Sovereign P2P Node Configuration
+# ====================================================
+
+# Display nickname for the node (no phone or email needed)
+nickname = Satoshi
+
+# P2P UDP port for gossip mesh & direct data transport
+udp_port = 9001
+
+# Web UI & WebSocket local server port (set to 0 if headless seed)
+ws_port = 9000
+
+# Directory for cryptographic keys, identities, and blobs
+data_dir = ./.wex_data
+
+# Run as dedicated seed & relay router (true/false)
+seed_mode = false
+
+# Initial bootstrap peers to discover the decentralized DHT swarm
+# Format: host:port, host:port
+bootstrap_nodes = 127.0.0.1:9001

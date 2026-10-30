@@ -29,6 +29,7 @@ set(WEX_CORE_SOURCES
     vendor/cjson/cJSON.c
     src/crypto/wex_crypto.c
     src/models/wex_models.c
+    src/models/wex_config.c
     src/net/wex_ws_server.c
     src/net/wex_p2p.c
     src/net/wex_nat.c
@@ -86,3 +87,7 @@ add_test(NAME test_seed_relay COMMAND test_seed_relay)
 add_executable(test_blob tests/test_blob.c)
 target_link_libraries(test_blob wex_core)
 add_test(NAME test_blob COMMAND test_blob)
+
+add_executable(test_config tests/test_config.c)
+target_link_libraries(test_config wex_core)
+add_test(NAME test_config COMMAND test_config)

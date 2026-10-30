@@ -2,6 +2,7 @@
 #include "wex_ws_server.h"
 #include "wex_nat.h"
 #include "wex_persist.h"
+#include "wex_config.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,7 @@ static void sig_handler(int sig) {
 static void print_usage(const char *prog) {
     printf("Usage: %s [options]\n", prog);
     printf("Options:\n");
+    printf("  --config <path>         Load configuration file (e.g. wex.conf)\n");
     printf("  --seed                  Run as headless P2P seed & relay node (no WebSocket/UI)\n");
     printf("  --port <port>           P2P UDP port (default: 9001)\n");
     printf("  --ws <port>             WebSocket & UI port (default: 9000)\n");
@@ -30,16 +32,41 @@ static void print_usage(const char *prog) {
 }
 
 int main(int argc, char **argv) {
-    bool is_seed = false;
-    int ws_port = WEX_DEFAULT_WS_PORT;
-    int udp_port = WEX_DEFAULT_UDP_PORT;
-    const char *nickname = "dotdok";
-    const char *data_dir = "./.wex_data";
+    const char *config_path = NULL;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
+            config_path = argv[++i];
+            break;
+        }
+    }
+
+    wex_config_t conf;
+    wex_config_set_defaults(&conf);
+
+    if (config_path) {
+        if (wex_config_load_file(&conf, config_path) == 0) {
+            printf("[+] Loaded configuration from %s\n", config_path);
+        } else {
+            fprintf(stderr, "[-] Warning: Failed to load configuration from %s\n", config_path);
+        }
+    } else if (access("wex.conf", R_OK) == 0) {
+        if (wex_config_load_file(&conf, "wex.conf") == 0) {
+            printf("[+] Auto-loaded configuration from ./wex.conf\n");
+        }
+    }
+
+    bool is_seed = conf.is_seed;
+    int ws_port = conf.ws_port;
+    int udp_port = conf.udp_port;
+    const char *nickname = conf.nickname;
+    const char *data_dir = conf.data_dir;
     const char *peer_target = NULL;
 
-    /* Parse command-line arguments */
+    /* Parse command-line arguments to allow overriding config */
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--seed") == 0) {
+        if (strcmp(argv[i], "--config") == 0 && i + 1 < argc) {
+            i++; /* already handled */
+        } else if (strcmp(argv[i], "--seed") == 0) {
             is_seed = true;
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             udp_port = atoi(argv[++i]);
@@ -143,6 +170,12 @@ int main(int argc, char **argv) {
             }
         }
 
+        for (size_t b = 0; b < conf.bootstrap_count; b++) {
+            printf("[*] Auto-connecting to config bootstrap peer %s:%d...\n",
+                   conf.bootstrap_peers[b].host, conf.bootstrap_peers[b].port);
+            wex_p2p_connect(&p2p_node, conf.bootstrap_peers[b].host, conf.bootstrap_peers[b].port);
+        }
+
         printf("[*] Seed node running on UDP :%d. Press Ctrl+C to stop.\n", udp_port);
 
         uint64_t last_stat_log = (uint64_t)time(NULL);
@@ -211,6 +244,12 @@ int main(int argc, char **argv) {
             printf("[*] Auto-connecting to initial P2P peer %s:%d...\n", ip_buf, peer_p);
             wex_server_connect_peer(&server, ip_buf, peer_p);
         }
+    }
+
+    for (size_t b = 0; b < conf.bootstrap_count; b++) {
+        printf("[*] Auto-connecting to config bootstrap peer %s:%d...\n",
+               conf.bootstrap_peers[b].host, conf.bootstrap_peers[b].port);
+        wex_server_connect_peer(&server, conf.bootstrap_peers[b].host, conf.bootstrap_peers[b].port);
     }
 
     printf("[+] Open your browser at: http://127.0.0.1:%d\n", ws_port);
