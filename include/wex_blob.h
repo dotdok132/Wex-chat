@@ -60,4 +60,8 @@ int wex_blob_save(const char *storage_dir, const wex_blob_info_t *info, const ui
 int wex_blob_load(const char *storage_dir, const uint8_t root_hash[WEX_BLOB_HASH_LEN],
                   uint8_t **out_data, size_t *out_size);
 
+/* Base64 encoding / decoding for WebSockets & UI */
+char *wex_b64_encode(const uint8_t *data, size_t input_len);
+uint8_t *wex_b64_decode(const char *b64_str, size_t *out_len);
+
 #endif /* WEX_BLOB_H */

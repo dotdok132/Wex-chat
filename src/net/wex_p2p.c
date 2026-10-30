@@ -2,6 +2,7 @@
 #include "wex_p2p.h"
 #include "wex_crypto.h"
 #include "wex_nat.h"
+#include "../../vendor/monocypher/monocypher.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -315,13 +316,16 @@ void wex_p2p_request_sync(wex_p2p_node_t *node, const struct sockaddr_in *target
            (struct sockaddr *)target_addr, sizeof(*target_addr));
 }
 
-static wex_peer_t *find_or_add_peer(wex_p2p_node_t *node, const struct sockaddr_in *addr, const uint8_t pk[32], const char *nickname) {
+static wex_peer_t *find_or_add_peer(wex_p2p_node_t *node, const struct sockaddr_in *addr, const uint8_t pk[32], const char *nickname, const uint8_t *x25519_pk) {
     for (size_t i = 0; i < node->peer_count; i++) {
         if (memcmp(node->peers[i].pk, pk, 32) == 0 ||
             (node->peers[i].addr.sin_addr.s_addr == addr->sin_addr.s_addr &&
              node->peers[i].addr.sin_port == addr->sin_port)) {
             node->peers[i].addr = *addr;
             memcpy(node->peers[i].pk, pk, 32);
+            if (x25519_pk) {
+                memcpy(node->peers[i].x25519_pk, x25519_pk, 32);
+            }
             if (nickname && strlen(nickname) > 0) {
                 strncpy(node->peers[i].nickname, nickname, sizeof(node->peers[i].nickname) - 1);
             }
@@ -335,6 +339,11 @@ static wex_peer_t *find_or_add_peer(wex_p2p_node_t *node, const struct sockaddr_
         wex_peer_t *p = &node->peers[node->peer_count++];
         p->addr = *addr;
         memcpy(p->pk, pk, 32);
+        if (x25519_pk) {
+            memcpy(p->x25519_pk, x25519_pk, 32);
+        } else {
+            crypto_eddsa_to_x25519(p->x25519_pk, pk);
+        }
         if (nickname && strlen(nickname) > 0) {
             strncpy(p->nickname, nickname, sizeof(p->nickname) - 1);
         } else {
@@ -367,19 +376,23 @@ int wex_p2p_connect(wex_p2p_node_t *node, const char *host_or_ip, int port) {
     memcpy(&target_addr, res->ai_addr, sizeof(target_addr));
     freeaddrinfo(res);
 
-    /* Send WEX_PKT_HELLO */
-    uint8_t buffer[512];
+    /* Send WEX_PKT_HELLO with x25519_pk and nickname */
+    uint8_t buffer[sizeof(wex_pkt_hdr_t) + sizeof(wex_pkt_hello_t)];
     wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
     hdr->magic = htonl(WEX_P2P_MAGIC);
     hdr->type = WEX_PKT_HELLO;
     memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
     memcpy(hdr->space_id, node->active_space_id, 32);
 
-    size_t nick_len = strlen(node->identity->nickname) + 1;
-    hdr->payload_len = htons((uint16_t)nick_len);
-    memcpy(buffer + sizeof(wex_pkt_hdr_t), node->identity->nickname, nick_len);
+    wex_pkt_hello_t hello;
+    memset(&hello, 0, sizeof(hello));
+    memcpy(hello.x25519_pk, node->identity->x25519_pk, 32);
+    strncpy(hello.nickname, node->identity->nickname, sizeof(hello.nickname) - 1);
 
-    size_t total_len = sizeof(wex_pkt_hdr_t) + nick_len;
+    hdr->payload_len = htons((uint16_t)sizeof(hello));
+    memcpy(buffer + sizeof(wex_pkt_hdr_t), &hello, sizeof(hello));
+
+    size_t total_len = sizeof(buffer);
     ssize_t sent = sendto(node->udp_fd, buffer, total_len, 0,
                           (struct sockaddr *)&target_addr, sizeof(target_addr));
     return (sent == (ssize_t)total_len) ? 0 : -1;
@@ -686,6 +699,36 @@ static void parse_and_deliver_chat_msg(wex_p2p_node_t *node, const uint8_t *payl
 
     /* Cryptographic verification of author's Ed25519 signature */
     if (wex_chat_msg_verify(&msg)) {
+        /* Auto-decrypt if encrypted */
+        if (msg.enc_flags == 1) {
+            wex_space_t *sp = wex_p2p_get_active_space(node);
+            if (sp) {
+                wex_chat_msg_decrypt(&msg, sp->space_key);
+            }
+        } else if (msg.enc_flags == 2) {
+            uint8_t peer_x25519[32];
+            bool has_key = false;
+            for (size_t p = 0; p < node->peer_count; p++) {
+                if (memcmp(node->peers[p].pk, msg.author_pk, 32) == 0) {
+                    memcpy(peer_x25519, node->peers[p].x25519_pk, 32);
+                    has_key = true;
+                    break;
+                }
+            }
+            if (!has_key) {
+                crypto_eddsa_to_x25519(peer_x25519, msg.author_pk);
+            }
+            uint8_t secret[32];
+            if (wex_ecdh(node->identity->x25519_sk, peer_x25519, secret) == 0) {
+                uint8_t dm_key[32];
+                if (wex_kdf_session_key(secret, NULL, "WEX_DM_SESSION", dm_key) == 0) {
+                    wex_chat_msg_decrypt(&msg, dm_key);
+                }
+                wex_clean(secret, 32);
+                wex_clean(dm_key, 32);
+            }
+        }
+
         if (node->journal) {
             wex_journal_append(node->journal, &msg);
         }
@@ -695,6 +738,77 @@ static void parse_and_deliver_chat_msg(wex_p2p_node_t *node, const uint8_t *payl
     } else {
         fprintf(stderr, "[!] Warning: Dropped forged/corrupted P2P message from %s\n", msg.author);
     }
+}
+
+int wex_p2p_send_dm(wex_p2p_node_t *node, const uint8_t target_pk[32], const char *text) {
+    if (!node || !target_pk || !text) return -1;
+
+    uint8_t target_x25519[32];
+    bool found_peer = false;
+    struct sockaddr_in target_addr;
+    memset(&target_addr, 0, sizeof(target_addr));
+
+    for (size_t i = 0; i < node->peer_count; i++) {
+        if (node->peers[i].active && memcmp(node->peers[i].pk, target_pk, 32) == 0) {
+            memcpy(target_x25519, node->peers[i].x25519_pk, 32);
+            target_addr = node->peers[i].addr;
+            found_peer = true;
+            break;
+        }
+    }
+
+    if (!found_peer) {
+        crypto_eddsa_to_x25519(target_x25519, target_pk);
+    }
+
+    uint8_t secret[32];
+    if (wex_ecdh(node->identity->x25519_sk, target_x25519, secret) != 0) {
+        return -1;
+    }
+
+    uint8_t dm_key[32];
+    if (wex_kdf_session_key(secret, NULL, "WEX_DM_SESSION", dm_key) != 0) {
+        wex_clean(secret, 32);
+        return -1;
+    }
+    wex_clean(secret, 32);
+
+    wex_chat_msg_t dm;
+    memset(&dm, 0, sizeof(dm));
+    /* Channel label for DM is dm:<hex_prefix> */
+    char target_hex[65];
+    wex_id_to_hex(target_pk, target_hex);
+    snprintf(dm.channel, sizeof(dm.channel), "dm:%.58s", target_hex);
+    strncpy(dm.content, text, sizeof(dm.content) - 1);
+
+    if (wex_chat_msg_encrypt(&dm, dm_key, 2) != 0) {
+        wex_clean(dm_key, 32);
+        return -1;
+    }
+    wex_clean(dm_key, 32);
+
+    if (wex_chat_msg_sign(&dm, node->identity) != 0) {
+        return -1;
+    }
+
+    if (found_peer) {
+        uint8_t buf[WEX_MAX_UDP_PAYLOAD];
+        size_t len = serialize_chat_msg(&dm, buf, sizeof(buf));
+        if (len > 0) {
+            sendto(node->udp_fd, buf, len, 0, (struct sockaddr *)&target_addr, sizeof(target_addr));
+        }
+    } else {
+        wex_p2p_relay_msg(node, target_pk, &dm);
+    }
+
+    if (node->journal) {
+        wex_chat_msg_t plain_copy = dm;
+        plain_copy.enc_flags = 0;
+        strncpy(plain_copy.content, text, sizeof(plain_copy.content) - 1);
+        wex_journal_append(node->journal, &plain_copy);
+    }
+
+    return 0;
 }
 
 int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
@@ -771,28 +885,38 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
         case WEX_PKT_HELLO: {
             char peer_nick[WEX_NAME_LEN];
             memset(peer_nick, 0, sizeof(peer_nick));
-            if (payload_len > 0) {
+            wex_pkt_hello_t hello;
+            const uint8_t *xpk = NULL;
+            if (payload_len >= sizeof(wex_pkt_hello_t)) {
+                memcpy(&hello, payload, sizeof(hello));
+                xpk = hello.x25519_pk;
+                strncpy(peer_nick, hello.nickname, sizeof(peer_nick) - 1);
+            } else if (payload_len > 0) {
                 size_t cpy = (payload_len < sizeof(peer_nick) - 1) ? payload_len : sizeof(peer_nick) - 1;
                 memcpy(peer_nick, payload, cpy);
             }
-            wex_peer_t *p = find_or_add_peer(node, &src_addr, hdr->sender_pk, peer_nick);
+            wex_peer_t *p = find_or_add_peer(node, &src_addr, hdr->sender_pk, peer_nick, xpk);
             if (p && node->peer_cb) {
                 node->peer_cb(p, true, node->user_data);
             }
 
             /* Send WELCOME back */
-            uint8_t resp_buf[512];
+            uint8_t resp_buf[sizeof(wex_pkt_hdr_t) + sizeof(wex_pkt_hello_t)];
             wex_pkt_hdr_t *resp_hdr = (wex_pkt_hdr_t *)resp_buf;
             resp_hdr->magic = htonl(WEX_P2P_MAGIC);
             resp_hdr->type = WEX_PKT_WELCOME;
             memcpy(resp_hdr->sender_pk, node->identity->sign_pk, 32);
             memcpy(resp_hdr->space_id, node->active_space_id, 32);
 
-            size_t my_nick_len = strlen(node->identity->nickname) + 1;
-            resp_hdr->payload_len = htons((uint16_t)my_nick_len);
-            memcpy(resp_buf + sizeof(wex_pkt_hdr_t), node->identity->nickname, my_nick_len);
+            wex_pkt_hello_t welcome;
+            memset(&welcome, 0, sizeof(welcome));
+            memcpy(welcome.x25519_pk, node->identity->x25519_pk, 32);
+            strncpy(welcome.nickname, node->identity->nickname, sizeof(welcome.nickname) - 1);
 
-            sendto(node->udp_fd, resp_buf, sizeof(wex_pkt_hdr_t) + my_nick_len, 0,
+            resp_hdr->payload_len = htons((uint16_t)sizeof(welcome));
+            memcpy(resp_buf + sizeof(wex_pkt_hdr_t), &welcome, sizeof(welcome));
+
+            sendto(node->udp_fd, resp_buf, sizeof(resp_buf), 0,
                    (struct sockaddr *)&src_addr, sizeof(src_addr));
             wex_p2p_send_space_info(node, &src_addr);
             break;
@@ -801,11 +925,17 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
         case WEX_PKT_WELCOME: {
             char peer_nick[WEX_NAME_LEN];
             memset(peer_nick, 0, sizeof(peer_nick));
-            if (payload_len > 0) {
+            wex_pkt_hello_t hello;
+            const uint8_t *xpk = NULL;
+            if (payload_len >= sizeof(wex_pkt_hello_t)) {
+                memcpy(&hello, payload, sizeof(hello));
+                xpk = hello.x25519_pk;
+                strncpy(peer_nick, hello.nickname, sizeof(peer_nick) - 1);
+            } else if (payload_len > 0) {
                 size_t cpy = (payload_len < sizeof(peer_nick) - 1) ? payload_len : sizeof(peer_nick) - 1;
                 memcpy(peer_nick, payload, cpy);
             }
-            wex_peer_t *p = find_or_add_peer(node, &src_addr, hdr->sender_pk, peer_nick);
+            wex_peer_t *p = find_or_add_peer(node, &src_addr, hdr->sender_pk, peer_nick, xpk);
             if (p) {
                 if (node->peer_cb) {
                     node->peer_cb(p, true, node->user_data);
@@ -971,17 +1101,20 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
             }
 
             /* Send HELLO to finalize connection */
-            find_or_add_peer(node, &remote_addr, remote_pk, "Peer");
-            uint8_t hello_buf[512];
+            find_or_add_peer(node, &remote_addr, remote_pk, "Peer", NULL);
+            uint8_t hello_buf[sizeof(wex_pkt_hdr_t) + sizeof(wex_pkt_hello_t)];
             wex_pkt_hdr_t *h_hdr = (wex_pkt_hdr_t *)hello_buf;
             h_hdr->magic = htonl(WEX_P2P_MAGIC);
             h_hdr->type = WEX_PKT_HELLO;
             memcpy(h_hdr->sender_pk, node->identity->sign_pk, 32);
             memcpy(h_hdr->space_id, node->active_space_id, 32);
-            size_t nlen = strlen(node->identity->nickname) + 1;
-            h_hdr->payload_len = htons((uint16_t)nlen);
-            memcpy(hello_buf + sizeof(wex_pkt_hdr_t), node->identity->nickname, nlen);
-            sendto(node->udp_fd, hello_buf, sizeof(wex_pkt_hdr_t) + nlen, 0,
+            wex_pkt_hello_t h_payload;
+            memset(&h_payload, 0, sizeof(h_payload));
+            memcpy(h_payload.x25519_pk, node->identity->x25519_pk, 32);
+            strncpy(h_payload.nickname, node->identity->nickname, sizeof(h_payload.nickname) - 1);
+            h_hdr->payload_len = htons((uint16_t)sizeof(h_payload));
+            memcpy(hello_buf + sizeof(wex_pkt_hdr_t), &h_payload, sizeof(h_payload));
+            sendto(node->udp_fd, hello_buf, sizeof(hello_buf), 0,
                    (struct sockaddr *)&remote_addr, sizeof(remote_addr));
             break;
         }

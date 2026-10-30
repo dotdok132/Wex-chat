@@ -14,6 +14,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <poll.h>
+#include <time.h>
 
 #define WS_GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -175,6 +176,28 @@ static size_t on_p2p_sync_request(const uint8_t space_id[32], const char *channe
     return count;
 }
 
+static void on_p2p_blob_event(const wex_blob_info_t *info, const uint8_t *data, void *user_data) {
+    wex_server_t *srv = (wex_server_t *)user_data;
+    if (!srv || !info) return;
+
+    char hash_hex[65];
+    wex_id_to_hex(info->root_hash, hash_hex);
+
+    cJSON *out = cJSON_CreateObject();
+    cJSON_AddStringToObject(out, "type", (data != NULL) ? "blob_received" : "blob_offered");
+    cJSON_AddStringToObject(out, "hash", hash_hex);
+    cJSON_AddStringToObject(out, "filename", info->filename);
+    cJSON_AddStringToObject(out, "mime_type", info->mime_type);
+    cJSON_AddNumberToObject(out, "size", (double)info->total_size);
+
+    char *json_out = cJSON_PrintUnformatted(out);
+    if (json_out) {
+        wex_server_broadcast(srv, json_out);
+        free(json_out);
+    }
+    cJSON_Delete(out);
+}
+
 int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *nickname) {
     if (!srv) return -1;
     memset(srv, 0, sizeof(*srv));
@@ -203,6 +226,7 @@ int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *ni
     wex_p2p_set_active_space(&srv->p2p, srv->spaces[0].space_id);
     wex_p2p_set_callbacks(&srv->p2p, on_p2p_incoming_msg, on_p2p_peer_event, srv);
     wex_p2p_set_sync_callback(&srv->p2p, on_p2p_sync_request);
+    wex_p2p_set_blob_callback(&srv->p2p, on_p2p_blob_event);
 
     return 0;
 }
@@ -291,6 +315,9 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
         if (srv->p2p.peers[p].active) {
             cJSON *peer_obj = cJSON_CreateObject();
             cJSON_AddStringToObject(peer_obj, "nickname", srv->p2p.peers[p].nickname);
+            char pk_hex[65];
+            wex_id_to_hex(srv->p2p.peers[p].pk, pk_hex);
+            cJSON_AddStringToObject(peer_obj, "public_key", pk_hex);
             char ip_buf[INET_ADDRSTRLEN];
             inet_ntop(AF_INET, &srv->p2p.peers[p].addr.sin_addr, ip_buf, sizeof(ip_buf));
             cJSON_AddStringToObject(peer_obj, "ip", ip_buf);
@@ -439,6 +466,150 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
                 /* If no direct 1-hop peer was reached, route through DHT next-hop toward space_id */
                 if (sent_direct == 0 && prov_count == 0 && srv->p2p.dht.total_contacts > 0) {
                     wex_p2p_relay_msg(&srv->p2p, msg.space_id, &msg);
+                }
+            }
+        }
+    } else if (strcmp(action->valuestring, "send_dm") == 0) {
+        cJSON *target_pk_json = cJSON_GetObjectItem(root, "target_pk");
+        cJSON *text = cJSON_GetObjectItem(root, "text");
+        if (target_pk_json && cJSON_IsString(target_pk_json) && text && cJSON_IsString(text)) {
+            uint8_t target_pk[32];
+            if (wex_hex_to_id(target_pk_json->valuestring, target_pk) == 0) {
+                wex_p2p_send_dm(&srv->p2p, target_pk, text->valuestring);
+
+                /* Broadcast to local WebSocket UI */
+                char ch_name[64];
+                char target_hex[65];
+                wex_id_to_hex(target_pk, target_hex);
+                snprintf(ch_name, sizeof(ch_name), "dm:%.58s", target_hex);
+
+                wex_chat_msg_t local_msg;
+                memset(&local_msg, 0, sizeof(local_msg));
+                strncpy(local_msg.author, srv->identity.nickname, sizeof(local_msg.author) - 1);
+                strncpy(local_msg.channel, ch_name, sizeof(local_msg.channel) - 1);
+                strncpy(local_msg.content, text->valuestring, sizeof(local_msg.content) - 1);
+                local_msg.timestamp_ms = (uint64_t)time(NULL) * 1000ULL;
+
+                if (srv->history_count < WEX_MAX_HISTORY) {
+                    srv->history[srv->history_count++] = local_msg;
+                }
+
+                cJSON *out = cJSON_CreateObject();
+                cJSON_AddStringToObject(out, "type", "message");
+                cJSON_AddStringToObject(out, "author", local_msg.author);
+                cJSON_AddStringToObject(out, "channel", local_msg.channel);
+                cJSON_AddStringToObject(out, "content", local_msg.content);
+                cJSON_AddNumberToObject(out, "timestamp_ms", (double)local_msg.timestamp_ms);
+                char *json_out = cJSON_PrintUnformatted(out);
+                if (json_out) {
+                    wex_server_broadcast(srv, json_out);
+                    free(json_out);
+                }
+                cJSON_Delete(out);
+            }
+        }
+    } else if (strcmp(action->valuestring, "upload_blob") == 0) {
+        cJSON *fname = cJSON_GetObjectItem(root, "filename");
+        cJSON *mtype = cJSON_GetObjectItem(root, "mime_type");
+        cJSON *b64_data = cJSON_GetObjectItem(root, "data_base64");
+        if (b64_data && cJSON_IsString(b64_data)) {
+            size_t data_len = 0;
+            uint8_t *bin = wex_b64_decode(b64_data->valuestring, &data_len);
+            if (bin) {
+                const char *fn = (fname && cJSON_IsString(fname)) ? fname->valuestring : "attachment.bin";
+                const char *mt = (mtype && cJSON_IsString(mtype)) ? mtype->valuestring : "application/octet-stream";
+
+                wex_blob_info_t info;
+                if (wex_blob_info_create(&info, fn, mt, bin, data_len) == 0) {
+                    wex_blob_save(srv->p2p.data_dir, &info, bin);
+                    wex_p2p_offer_blob(&srv->p2p, &info);
+
+                    char hash_hex[65];
+                    wex_id_to_hex(info.root_hash, hash_hex);
+
+                    /* Send chat message containing the attachment tag */
+                    char attach_msg[512];
+                    snprintf(attach_msg, sizeof(attach_msg), "[attachment:%s:%s:%llu:%s]",
+                             hash_hex, info.filename, (unsigned long long)info.total_size, info.mime_type);
+
+                    wex_chat_msg_t msg;
+                    memset(&msg, 0, sizeof(msg));
+                    memcpy(msg.space_id, srv->p2p.active_space_id, WEX_ID_LEN);
+                    strncpy(msg.channel, srv->p2p.active_channel, sizeof(msg.channel) - 1);
+                    strncpy(msg.content, attach_msg, sizeof(msg.content) - 1);
+                    wex_chat_msg_sign(&msg, &srv->identity);
+
+                    if (srv->history_count < WEX_MAX_HISTORY) {
+                        srv->history[srv->history_count++] = msg;
+                    }
+
+                    cJSON *out = cJSON_CreateObject();
+                    cJSON_AddStringToObject(out, "type", "message");
+                    cJSON_AddStringToObject(out, "author", msg.author);
+                    cJSON_AddStringToObject(out, "channel", msg.channel);
+                    cJSON_AddStringToObject(out, "content", msg.content);
+                    cJSON_AddNumberToObject(out, "timestamp_ms", (double)msg.timestamp_ms);
+                    char *json_out = cJSON_PrintUnformatted(out);
+                    if (json_out) {
+                        wex_server_broadcast(srv, json_out);
+                        free(json_out);
+                    }
+                    cJSON_Delete(out);
+
+                    wex_p2p_broadcast_msg(&srv->p2p, &msg);
+
+                    /* Send confirmation */
+                    cJSON *ack = cJSON_CreateObject();
+                    cJSON_AddStringToObject(ack, "type", "blob_uploaded");
+                    cJSON_AddStringToObject(ack, "hash", hash_hex);
+                    cJSON_AddStringToObject(ack, "filename", info.filename);
+                    cJSON_AddNumberToObject(ack, "size", (double)info.total_size);
+                    char *ack_str = cJSON_PrintUnformatted(ack);
+                    if (ack_str) {
+                        send_ws_frame(client_fd, ack_str, strlen(ack_str));
+                        free(ack_str);
+                    }
+                    cJSON_Delete(ack);
+                }
+                free(bin);
+            }
+        }
+    } else if (strcmp(action->valuestring, "get_blob") == 0) {
+        cJSON *hash_json = cJSON_GetObjectItem(root, "hash");
+        if (hash_json && cJSON_IsString(hash_json) && strlen(hash_json->valuestring) == 64) {
+            uint8_t root_hash[32];
+            if (wex_hex_to_id(hash_json->valuestring, root_hash) == 0) {
+                uint8_t *blob_data = NULL;
+                size_t blob_sz = 0;
+                if (wex_blob_load(srv->p2p.data_dir, root_hash, &blob_data, &blob_sz) == 0) {
+                    char *b64 = wex_b64_encode(blob_data, blob_sz);
+                    if (b64) {
+                        cJSON *resp = cJSON_CreateObject();
+                        cJSON_AddStringToObject(resp, "type", "blob_data");
+                        cJSON_AddStringToObject(resp, "hash", hash_json->valuestring);
+                        cJSON_AddStringToObject(resp, "data_base64", b64);
+                        cJSON_AddNumberToObject(resp, "size", (double)blob_sz);
+                        char *resp_str = cJSON_PrintUnformatted(resp);
+                        if (resp_str) {
+                            send_ws_frame(client_fd, resp_str, strlen(resp_str));
+                            free(resp_str);
+                        }
+                        cJSON_Delete(resp);
+                        free(b64);
+                    }
+                    free(blob_data);
+                } else {
+                    /* Not on disk - auto request download from first available peer */
+                    wex_blob_info_t req_info;
+                    memset(&req_info, 0, sizeof(req_info));
+                    memcpy(req_info.root_hash, root_hash, 32);
+                    req_info.total_chunks = 1;
+                    for (size_t p = 0; p < srv->p2p.peer_count; p++) {
+                        if (srv->p2p.peers[p].active) {
+                            wex_p2p_download_blob(&srv->p2p, &srv->p2p.peers[p].addr, &req_info);
+                            break;
+                        }
+                    }
                 }
             }
         }

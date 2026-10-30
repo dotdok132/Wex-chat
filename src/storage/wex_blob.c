@@ -208,3 +208,74 @@ int wex_blob_load(const char *storage_dir, const uint8_t root_hash[WEX_BLOB_HASH
     *out_size = sz;
     return 0;
 }
+
+static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+char *wex_b64_encode(const uint8_t *data, size_t input_len) {
+    if (!data && input_len > 0) return NULL;
+    size_t out_len = 4 * ((input_len + 2) / 3);
+    char *out = malloc(out_len + 1);
+    if (!out) return NULL;
+
+    size_t i = 0, j = 0;
+    while (i < input_len) {
+        size_t rem = input_len - i;
+        uint32_t a = data[i++];
+        uint32_t b = (rem > 1) ? data[i++] : 0;
+        uint32_t c = (rem > 2) ? data[i++] : 0;
+
+        uint32_t triple = (a << 16) | (b << 8) | c;
+
+        out[j++] = b64_table[(triple >> 18) & 0x3F];
+        out[j++] = b64_table[(triple >> 12) & 0x3F];
+        out[j++] = (rem > 1) ? b64_table[(triple >> 6) & 0x3F] : '=';
+        out[j++] = (rem > 2) ? b64_table[triple & 0x3F] : '=';
+    }
+    out[j] = '\0';
+    return out;
+}
+
+static int b64_val(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+uint8_t *wex_b64_decode(const char *b64_str, size_t *out_len) {
+    if (!b64_str || !out_len) return NULL;
+    size_t len = strlen(b64_str);
+    if (len % 4 != 0) return NULL;
+
+    size_t alloc_sz = (len / 4) * 3;
+    uint8_t *out = malloc(alloc_sz + 1);
+    if (!out) return NULL;
+
+    size_t j = 0;
+    for (size_t i = 0; i < len; i += 4) {
+        int v0 = b64_val(b64_str[i]);
+        int v1 = b64_val(b64_str[i + 1]);
+        int v2 = (b64_str[i + 2] == '=') ? 0 : b64_val(b64_str[i + 2]);
+        int v3 = (b64_str[i + 3] == '=') ? 0 : b64_val(b64_str[i + 3]);
+
+        if (v0 < 0 || v1 < 0 || (b64_str[i + 2] != '=' && v2 < 0) || (b64_str[i + 3] != '=' && v3 < 0)) {
+            free(out);
+            return NULL;
+        }
+
+        uint32_t triple = ((uint32_t)v0 << 18) | ((uint32_t)v1 << 12) | ((uint32_t)v2 << 6) | (uint32_t)v3;
+
+        out[j++] = (uint8_t)((triple >> 16) & 0xFF);
+        if (b64_str[i + 2] != '=') {
+            out[j++] = (uint8_t)((triple >> 8) & 0xFF);
+        }
+        if (b64_str[i + 3] != '=') {
+            out[j++] = (uint8_t)(triple & 0xFF);
+        }
+    }
+
+    *out_len = j;
+    return out;
+}

@@ -55,6 +55,24 @@ static void test_blob_disk_storage(void) {
     TEST_PASS("Blob Hash, Chunk Calculation, and Disk Persistence");
 }
 
+static void test_blob_base64(void) {
+    const char *text = "Wex-Chat: Privacy-first sovereign P2P Discord alternative!";
+    size_t in_len = strlen(text);
+
+    char *b64 = wex_b64_encode((const uint8_t *)text, in_len);
+    assert(b64 != NULL);
+
+    size_t out_len = 0;
+    uint8_t *decoded = wex_b64_decode(b64, &out_len);
+    assert(decoded != NULL);
+    assert(out_len == in_len);
+    assert(memcmp(text, decoded, in_len) == 0);
+
+    free(b64);
+    free(decoded);
+    TEST_PASS("Base64 Encode & Decode");
+}
+
 static void test_p2p_blob_transfer(void) {
     const char *dir_a = "/tmp/wex_blob_alice";
     const char *dir_b = "/tmp/wex_blob_bob";
@@ -132,6 +150,7 @@ int main(void) {
     printf("====================================================\n");
 
     test_blob_disk_storage();
+    test_blob_base64();
     test_p2p_blob_transfer();
 
     printf("====================================================\n");

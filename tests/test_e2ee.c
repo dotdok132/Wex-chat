@@ -1,12 +1,70 @@
 #define _GNU_SOURCE
 #include "wex_crypto.h"
 #include "wex_models.h"
+#include "wex_p2p.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
 
 #define TEST_PASS(name) printf("  [PASS] %s\n", name)
+
+typedef struct {
+    int received_count;
+    char last_content[256];
+    char last_channel[64];
+    uint8_t last_author_pk[32];
+} dm_sink_t;
+
+static void on_test_dm_msg(const wex_chat_msg_t *msg, void *user_data) {
+    dm_sink_t *sink = (dm_sink_t *)user_data;
+    sink->received_count++;
+    strncpy(sink->last_content, msg->content, sizeof(sink->last_content) - 1);
+    strncpy(sink->last_channel, msg->channel, sizeof(sink->last_channel) - 1);
+    memcpy(sink->last_author_pk, msg->author_pk, 32);
+}
+
+static void test_p2p_dm_live_exchange(void) {
+    wex_identity_t alice, bob;
+    assert(wex_identity_init(&alice, NULL, "Alice") == 0);
+    assert(wex_identity_init(&bob, NULL, "Bob") == 0);
+
+    wex_p2p_node_t node_a, node_b;
+    assert(wex_p2p_init(&node_a, &alice, 35001) == 0);
+    assert(wex_p2p_init(&node_b, &bob, 35002) == 0);
+
+    dm_sink_t bob_sink = {0};
+    wex_p2p_set_callbacks(&node_b, on_test_dm_msg, NULL, &bob_sink);
+
+    assert(wex_p2p_connect(&node_a, "127.0.0.1", 35002) == 0);
+    for (int i = 0; i < 20; i++) {
+        wex_p2p_poll(&node_a, 5);
+        wex_p2p_poll(&node_b, 5);
+        usleep(5000);
+    }
+    assert(node_a.peer_count == 1);
+    assert(node_b.peer_count == 1);
+
+    /* Alice sends encrypted DM to Bob */
+    assert(wex_p2p_send_dm(&node_a, bob.sign_pk, "Secret agent Bob, mission start!") == 0);
+
+    for (int i = 0; i < 20; i++) {
+        wex_p2p_poll(&node_a, 5);
+        wex_p2p_poll(&node_b, 5);
+        usleep(5000);
+        if (bob_sink.received_count > 0) break;
+    }
+
+    assert(bob_sink.received_count == 1);
+    assert(strcmp(bob_sink.last_content, "Secret agent Bob, mission start!") == 0);
+    assert(strstr(bob_sink.last_channel, "dm:") != NULL);
+    assert(memcmp(bob_sink.last_author_pk, alice.sign_pk, 32) == 0);
+
+    wex_p2p_close(&node_a);
+    wex_p2p_close(&node_b);
+    TEST_PASS("Live P2P E2EE Direct Message Auto-Decryption over Network");
+}
 
 static void test_x25519_ecdh_and_kdf(void) {
     wex_identity_t alice, bob;
@@ -106,6 +164,7 @@ int main(void) {
     test_x25519_ecdh_and_kdf();
     test_channel_e2ee_encryption();
     test_direct_message_e2ee();
+    test_p2p_dm_live_exchange();
 
     printf("====================================================\n");
     printf("  ALL E2EE TESTS PASSED SUCCESSFULLY!               \n");

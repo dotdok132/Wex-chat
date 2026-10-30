@@ -50,12 +50,18 @@ typedef struct {
     uint8_t  space_id[32];          /* Target Space ID */
     uint16_t payload_len;           /* Length of payload following header */
 } wex_pkt_hdr_t;
+
+typedef struct {
+    uint8_t  x25519_pk[32];         /* X25519 key exchange public key */
+    char     nickname[WEX_NAME_LEN];/* Peer display nickname */
+} wex_pkt_hello_t;
 #pragma pack(pop)
 
 /* Peer node tracking */
 typedef struct {
     struct sockaddr_in addr;
     uint8_t pk[32];
+    uint8_t x25519_pk[32];
     char nickname[WEX_NAME_LEN];
     uint64_t last_seen_ms;
     bool active;
@@ -151,6 +157,9 @@ void wex_p2p_request_sync(wex_p2p_node_t *node, const struct sockaddr_in *target
 
 /* Broadcast a chat message to all connected peers in the space */
 int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg);
+
+/* Send encrypted Direct Message (E2EE with X25519 + ChaCha20-Poly1305) */
+int wex_p2p_send_dm(wex_p2p_node_t *node, const uint8_t target_pk[32], const char *text);
 
 /* Transit overlay routing: forwards a message toward destination ID through next-hop in DHT */
 int wex_p2p_relay_msg(wex_p2p_node_t *node, const uint8_t dst_id[32], const wex_chat_msg_t *msg);
