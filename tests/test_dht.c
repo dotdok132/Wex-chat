@@ -306,6 +306,121 @@ static void test_dht_find_node_network_query(void) {
     wex_p2p_close(&node_b);
 }
 
+static void test_iterative_node_lookup(void) {
+    wex_identity_t id_a, id_b, id_c;
+    assert(wex_identity_init(&id_a, NULL, "NodeA") == 0);
+    assert(wex_identity_init(&id_b, NULL, "NodeB") == 0);
+    assert(wex_identity_init(&id_c, NULL, "NodeC") == 0);
+
+    wex_p2p_node_t node_a, node_b, node_c;
+    assert(wex_p2p_init(&node_a, &id_a, 27001) == 0);
+    assert(wex_p2p_init(&node_b, &id_b, 27002) == 0);
+    assert(wex_p2p_init(&node_c, &id_c, 27003) == 0);
+
+    /* Node A knows Node B */
+    assert(wex_p2p_connect(&node_a, "127.0.0.1", 27002) == 0);
+    /* Node B knows Node C */
+    assert(wex_p2p_connect(&node_b, "127.0.0.1", 27003) == 0);
+
+    for (int t = 0; t < 15; t++) {
+        wex_p2p_poll(&node_a, 5);
+        wex_p2p_poll(&node_b, 5);
+        wex_p2p_poll(&node_c, 5);
+        usleep(5000);
+    }
+
+    /* Node A does NOT have Node C initially */
+    wex_dht_contact_t closest[1];
+    size_t found = wex_dht_find_closest(&node_a.dht, id_c.sign_pk, closest, 1);
+    assert(found == 1);
+    assert(memcmp(closest[0].id, id_c.sign_pk, 32) != 0);
+
+    /* Node A initiates Kademlia iterative lookup for Node C's ID */
+    assert(wex_p2p_start_node_lookup(&node_a, id_c.sign_pk) == 0);
+
+    /* Poll network for iterative convergence */
+    for (int t = 0; t < 20; t++) {
+        wex_p2p_poll(&node_a, 5);
+        wex_p2p_poll(&node_b, 5);
+        wex_p2p_poll(&node_c, 5);
+        usleep(5000);
+    }
+
+    /* Node A must now have discovered Node C directly via iterative Kademlia lookup */
+    found = wex_dht_find_closest(&node_a.dht, id_c.sign_pk, closest, 1);
+    assert(found == 1);
+    assert(memcmp(closest[0].id, id_c.sign_pk, 32) == 0);
+
+    TEST_PASS("Kademlia Iterative Node Lookup: multi-hop discovery converges to target ID");
+
+    wex_p2p_close(&node_a);
+    wex_p2p_close(&node_b);
+    wex_p2p_close(&node_c);
+}
+
+static void test_decentralized_space_discovery(void) {
+    wex_identity_t id_dht, id_alice, id_bob;
+    assert(wex_identity_init(&id_dht, NULL, "DHT_Node") == 0);
+    assert(wex_identity_init(&id_alice, NULL, "Alice") == 0);
+    assert(wex_identity_init(&id_bob, NULL, "Bob") == 0);
+
+    wex_p2p_node_t node_dht, node_alice, node_bob;
+    assert(wex_p2p_init(&node_dht, &id_dht, 28001) == 0);
+    assert(wex_p2p_init(&node_alice, &id_alice, 28002) == 0);
+    assert(wex_p2p_init(&node_bob, &id_bob, 28003) == 0);
+
+    uint8_t guild_space[32];
+    memset(guild_space, 0x42, 32);
+
+    /* Alice connects to DHT node and announces her presence in guild_space */
+    assert(wex_p2p_connect(&node_alice, "127.0.0.1", 28001) == 0);
+    for (int t = 0; t < 10; t++) {
+        wex_p2p_poll(&node_dht, 5);
+        wex_p2p_poll(&node_alice, 5);
+        usleep(5000);
+    }
+    assert(wex_p2p_announce_space(&node_alice, guild_space) >= 1);
+
+    for (int t = 0; t < 10; t++) {
+        wex_p2p_poll(&node_dht, 5);
+        wex_p2p_poll(&node_alice, 5);
+        usleep(5000);
+    }
+
+    /* Bob connects to DHT node and queries for providers of guild_space */
+    assert(wex_p2p_connect(&node_bob, "127.0.0.1", 28001) == 0);
+    for (int t = 0; t < 10; t++) {
+        wex_p2p_poll(&node_dht, 5);
+        wex_p2p_poll(&node_bob, 5);
+        usleep(5000);
+    }
+    assert(wex_p2p_find_space_peers(&node_bob, guild_space) >= 1);
+
+    /* Poll network: DHT node returns Alice to Bob; Bob connects to Alice directly */
+    for (int t = 0; t < 25; t++) {
+        wex_p2p_poll(&node_dht, 5);
+        wex_p2p_poll(&node_alice, 5);
+        wex_p2p_poll(&node_bob, 5);
+        usleep(5000);
+    }
+
+    /* Bob should now be directly connected to Alice! */
+    bool bob_knows_alice = false;
+    for (size_t i = 0; i < node_bob.peer_count; i++) {
+        if (memcmp(node_bob.peers[i].pk, id_alice.sign_pk, 32) == 0) {
+            bob_knows_alice = true;
+            break;
+        }
+    }
+    assert(bob_knows_alice == true);
+
+    TEST_PASS("Decentralized Space/Guild Provider Discovery via DHT (WEX_PKT_DHT_ANNOUNCE/PROVIDERS)");
+
+    wex_p2p_close(&node_dht);
+    wex_p2p_close(&node_alice);
+    wex_p2p_close(&node_bob);
+}
+
 int main(void) {
     printf("====================================================\n");
     printf("  Running Wex Kademlia DHT & Overlay Routing Tests  \n");
@@ -318,6 +433,8 @@ int main(void) {
     test_transit_relay_next_hop();
     test_end_to_end_transit_relay();
     test_dht_find_node_network_query();
+    test_iterative_node_lookup();
+    test_decentralized_space_discovery();
 
     printf("====================================================\n");
     printf("  ALL KADEMLIA DHT TESTS PASSED SUCCESSFULLY!       \n");

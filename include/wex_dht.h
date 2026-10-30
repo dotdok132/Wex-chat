@@ -12,6 +12,8 @@
 #define WEX_DHT_MAX_PROVIDERS 64 /* Max peers per swarm topic */
 #define WEX_DHT_MAX_TOPICS 32    /* Max active spaces/topics tracked */
 #define WEX_DHT_MAX_HOPS 8       /* Max relay hops for overlay transit */
+#define WEX_DHT_ALPHA 3          /* Concurrency factor alpha */
+#define WEX_DHT_LOOKUP_MAX 16    /* Max candidates tracked in iterative lookup */
 
 /* DHT Node Contact */
 typedef struct {
@@ -19,6 +21,16 @@ typedef struct {
     struct sockaddr_in addr;
     uint64_t last_seen_ms;
 } wex_dht_contact_t;
+
+/* Iterative Node Lookup State Machine */
+typedef struct {
+    uint8_t target_id[WEX_DHT_ID_LEN];
+    wex_dht_contact_t candidates[WEX_DHT_LOOKUP_MAX];
+    bool queried[WEX_DHT_LOOKUP_MAX];
+    size_t count;
+    bool finished;
+    uint64_t started_ms;
+} wex_dht_lookup_t;
 
 /* K-Bucket containing up to K contacts */
 typedef struct {
@@ -106,5 +118,24 @@ size_t wex_dht_get_topic_providers(wex_dht_table_t *table,
 bool wex_dht_next_hop(const wex_dht_table_t *table,
                       const uint8_t target_id[WEX_DHT_ID_LEN],
                       wex_dht_contact_t *out_next_hop);
+
+/* Initialize an iterative lookup for target ID using closest known contacts */
+void wex_dht_lookup_init(wex_dht_lookup_t *lookup,
+                         const wex_dht_table_t *table,
+                         const uint8_t target_id[WEX_DHT_ID_LEN],
+                         uint64_t now_ms);
+
+/* Retrieve up to 'max_queries' unqueried candidates closest to target */
+size_t wex_dht_lookup_get_next(wex_dht_lookup_t *lookup,
+                               size_t max_queries,
+                               wex_dht_contact_t out_queries[]);
+
+/* Incorporate results (discovered contacts) from a FIND_NODE reply into the lookup candidates */
+void wex_dht_lookup_add_candidates(wex_dht_lookup_t *lookup,
+                                   const wex_dht_contact_t contacts[],
+                                   size_t count);
+
+/* Check if the iterative lookup has finished (no more unqueried candidates) */
+bool wex_dht_lookup_is_done(const wex_dht_lookup_t *lookup);
 
 #endif /* WEX_DHT_H */

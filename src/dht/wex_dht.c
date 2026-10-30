@@ -261,3 +261,96 @@ bool wex_dht_next_hop(const wex_dht_table_t *table,
 
     return false; /* We are closer than any known contact */
 }
+
+void wex_dht_lookup_init(wex_dht_lookup_t *lookup,
+                         const wex_dht_table_t *table,
+                         const uint8_t target_id[WEX_DHT_ID_LEN],
+                         uint64_t now_ms) {
+    if (!lookup || !table || !target_id) return;
+    memset(lookup, 0, sizeof(*lookup));
+    memcpy(lookup->target_id, target_id, WEX_DHT_ID_LEN);
+    lookup->started_ms = now_ms;
+
+    lookup->count = wex_dht_find_closest(table, target_id, lookup->candidates, WEX_DHT_LOOKUP_MAX);
+    for (size_t i = 0; i < lookup->count; i++) {
+        lookup->queried[i] = false;
+    }
+    lookup->finished = (lookup->count == 0);
+}
+
+size_t wex_dht_lookup_get_next(wex_dht_lookup_t *lookup,
+                               size_t max_queries,
+                               wex_dht_contact_t out_queries[]) {
+    if (!lookup || !out_queries || max_queries == 0 || lookup->finished) return 0;
+
+    size_t found = 0;
+    for (size_t i = 0; i < lookup->count && found < max_queries; i++) {
+        if (!lookup->queried[i]) {
+            out_queries[found++] = lookup->candidates[i];
+            lookup->queried[i] = true;
+        }
+    }
+
+    if (found == 0) {
+        lookup->finished = true;
+    }
+    return found;
+}
+
+void wex_dht_lookup_add_candidates(wex_dht_lookup_t *lookup,
+                                   const wex_dht_contact_t contacts[],
+                                   size_t count) {
+    if (!lookup || !contacts || count == 0) return;
+
+    for (size_t c = 0; c < count; c++) {
+        const wex_dht_contact_t *cand = &contacts[c];
+
+        /* Check duplicate */
+        bool exists = false;
+        for (size_t i = 0; i < lookup->count; i++) {
+            if (memcmp(lookup->candidates[i].id, cand->id, WEX_DHT_ID_LEN) == 0) {
+                exists = true;
+                break;
+            }
+        }
+        if (exists) continue;
+
+        uint8_t cand_dist[WEX_DHT_ID_LEN];
+        wex_dht_distance(cand->id, lookup->target_id, cand_dist);
+
+        /* Find insertion position to keep candidates sorted by distance */
+        size_t ins = 0;
+        while (ins < lookup->count) {
+            uint8_t cur_dist[WEX_DHT_ID_LEN];
+            wex_dht_distance(lookup->candidates[ins].id, lookup->target_id, cur_dist);
+            if (wex_dht_dist_cmp(cand_dist, cur_dist) < 0) {
+                break;
+            }
+            ins++;
+        }
+
+        if (ins < WEX_DHT_LOOKUP_MAX) {
+            size_t move_count = (lookup->count < WEX_DHT_LOOKUP_MAX) ? (lookup->count - ins) : (WEX_DHT_LOOKUP_MAX - 1 - ins);
+            if (move_count > 0) {
+                memmove(&lookup->candidates[ins + 1], &lookup->candidates[ins], move_count * sizeof(wex_dht_contact_t));
+                memmove(&lookup->queried[ins + 1], &lookup->queried[ins], move_count * sizeof(bool));
+            }
+            lookup->candidates[ins] = *cand;
+            lookup->queried[ins] = false;
+            if (lookup->count < WEX_DHT_LOOKUP_MAX) {
+                lookup->count++;
+            }
+            lookup->finished = false; /* New candidate to query */
+        }
+    }
+}
+
+bool wex_dht_lookup_is_done(const wex_dht_lookup_t *lookup) {
+    if (!lookup) return true;
+    if (lookup->finished) return true;
+    for (size_t i = 0; i < lookup->count; i++) {
+        if (!lookup->queried[i]) return false;
+    }
+    return true;
+}
+

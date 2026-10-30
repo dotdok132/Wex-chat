@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "wex_p2p.h"
 #include "wex_crypto.h"
+#include "wex_nat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +9,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <time.h>
+#include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -129,16 +131,24 @@ static wex_peer_t *find_or_add_peer(wex_p2p_node_t *node, const struct sockaddr_
     return NULL;
 }
 
-int wex_p2p_connect(wex_p2p_node_t *node, const char *ip_str, int port) {
-    if (!node || node->udp_fd < 0 || !ip_str) return -1;
+int wex_p2p_connect(wex_p2p_node_t *node, const char *host_or_ip, int port) {
+    if (!node || node->udp_fd < 0 || !host_or_ip) return -1;
 
-    struct sockaddr_in target_addr;
-    memset(&target_addr, 0, sizeof(target_addr));
-    target_addr.sin_family = AF_INET;
-    target_addr.sin_port = htons((uint16_t)port);
-    if (inet_pton(AF_INET, ip_str, &target_addr.sin_addr) <= 0) {
+    char port_str[16];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    if (getaddrinfo(host_or_ip, port_str, &hints, &res) != 0 || !res) {
         return -1;
     }
+
+    struct sockaddr_in target_addr;
+    memcpy(&target_addr, res->ai_addr, sizeof(target_addr));
+    freeaddrinfo(res);
 
     /* Send WEX_PKT_HELLO */
     uint8_t buffer[512];
@@ -268,6 +278,129 @@ int wex_p2p_send_find_node(wex_p2p_node_t *node, const struct sockaddr_in *targe
     return (s == (ssize_t)sizeof(buffer)) ? 0 : -1;
 }
 
+int wex_p2p_punch_hole(wex_p2p_node_t *node, const struct sockaddr_in *rendezvous_addr, const uint8_t target_pk[32]) {
+    if (!node || node->udp_fd < 0 || !rendezvous_addr || !target_pk) return -1;
+
+    uint8_t buffer[sizeof(wex_pkt_hdr_t) + 32];
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    hdr->magic = htonl(WEX_P2P_MAGIC);
+    hdr->type = WEX_PKT_NAT_PUNCH_REQ;
+    memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
+    memcpy(hdr->space_id, node->active_space_id, 32);
+    hdr->payload_len = htons(32);
+    memcpy(buffer + sizeof(wex_pkt_hdr_t), target_pk, 32);
+
+    ssize_t s = sendto(node->udp_fd, buffer, sizeof(buffer), 0,
+                       (struct sockaddr *)rendezvous_addr, sizeof(*rendezvous_addr));
+    return (s == (ssize_t)sizeof(buffer)) ? 0 : -1;
+}
+
+int wex_p2p_start_node_lookup(wex_p2p_node_t *node, const uint8_t target_id[32]) {
+    if (!node || node->udp_fd < 0 || !target_id) return -1;
+    if (node->lookup_count >= 4) {
+        /* Evict oldest */
+        memmove(&node->active_lookups[0], &node->active_lookups[1], 3 * sizeof(wex_dht_lookup_t));
+        node->lookup_count = 3;
+    }
+
+    wex_dht_lookup_t *lk = &node->active_lookups[node->lookup_count++];
+    wex_dht_lookup_init(lk, &node->dht, target_id, get_time_ms());
+
+    wex_dht_contact_t queries[WEX_DHT_ALPHA];
+    size_t count = wex_dht_lookup_get_next(lk, WEX_DHT_ALPHA, queries);
+    for (size_t i = 0; i < count; i++) {
+        wex_p2p_send_find_node(node, &queries[i].addr, target_id);
+    }
+    return 0;
+}
+
+int wex_p2p_announce_space(wex_p2p_node_t *node, const uint8_t space_id[32]) {
+    if (!node || node->udp_fd < 0 || !space_id) return -1;
+
+    wex_dht_contact_t closest[WEX_DHT_K];
+    size_t found = wex_dht_find_closest(&node->dht, space_id, closest, WEX_DHT_K);
+
+    uint8_t buffer[sizeof(wex_pkt_hdr_t)];
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    hdr->magic = htonl(WEX_P2P_MAGIC);
+    hdr->type = WEX_PKT_DHT_ANNOUNCE;
+    memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
+    memcpy(hdr->space_id, space_id, 32);
+    hdr->payload_len = 0;
+
+    int sent = 0;
+    for (size_t i = 0; i < found; i++) {
+        ssize_t s = sendto(node->udp_fd, buffer, sizeof(buffer), 0,
+                           (struct sockaddr *)&closest[i].addr, sizeof(closest[i].addr));
+        if (s == (ssize_t)sizeof(buffer)) sent++;
+    }
+    return sent;
+}
+
+int wex_p2p_find_space_peers(wex_p2p_node_t *node, const uint8_t space_id[32]) {
+    if (!node || node->udp_fd < 0 || !space_id) return -1;
+
+    wex_dht_contact_t closest[WEX_DHT_K];
+    size_t found = wex_dht_find_closest(&node->dht, space_id, closest, WEX_DHT_K);
+
+    uint8_t buffer[sizeof(wex_pkt_hdr_t)];
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    hdr->magic = htonl(WEX_P2P_MAGIC);
+    hdr->type = WEX_PKT_DHT_GET_PROVIDERS;
+    memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
+    memcpy(hdr->space_id, space_id, 32);
+    hdr->payload_len = 0;
+
+    int sent = 0;
+    for (size_t i = 0; i < found; i++) {
+        ssize_t s = sendto(node->udp_fd, buffer, sizeof(buffer), 0,
+                           (struct sockaddr *)&closest[i].addr, sizeof(closest[i].addr));
+        if (s == (ssize_t)sizeof(buffer)) sent++;
+    }
+    return sent;
+}
+
+void wex_p2p_maintain(wex_p2p_node_t *node, uint64_t now_ms) {
+    if (!node || node->udp_fd < 0) return;
+    if (now_ms - node->last_maintenance_ms < 1000) return;
+    node->last_maintenance_ms = now_ms;
+
+    /* Ping active peers periodically to keep NAT mappings open */
+    for (size_t i = 0; i < node->peer_count; i++) {
+        if (!node->peers[i].active) continue;
+        if (now_ms - node->peers[i].last_seen_ms > 60000) {
+            /* Peer timed out */
+            node->peers[i].active = false;
+            if (node->peer_cb) {
+                node->peer_cb(&node->peers[i], false, node->user_data);
+            }
+        } else if (now_ms - node->peers[i].last_seen_ms > 25000) {
+            /* Send keepalive ping */
+            uint8_t ping_buf[sizeof(wex_pkt_hdr_t)];
+            wex_pkt_hdr_t *h = (wex_pkt_hdr_t *)ping_buf;
+            h->magic = htonl(WEX_P2P_MAGIC);
+            h->type = WEX_PKT_PING;
+            memcpy(h->sender_pk, node->identity->sign_pk, 32);
+            memcpy(h->space_id, node->active_space_id, 32);
+            h->payload_len = 0;
+            sendto(node->udp_fd, ping_buf, sizeof(ping_buf), 0,
+                   (struct sockaddr *)&node->peers[i].addr, sizeof(node->peers[i].addr));
+        }
+    }
+
+    /* Prune completed lookups */
+    size_t active_idx = 0;
+    for (size_t i = 0; i < node->lookup_count; i++) {
+        if (!wex_dht_lookup_is_done(&node->active_lookups[i]) && (now_ms - node->active_lookups[i].started_ms < 10000)) {
+            if (active_idx != i) {
+                node->active_lookups[active_idx] = node->active_lookups[i];
+            }
+            active_idx++;
+        }
+    }
+    node->lookup_count = active_idx;
+}
+
 static void parse_and_deliver_chat_msg(wex_p2p_node_t *node, const uint8_t *payload, size_t payload_len, const uint8_t sender_pk[32], const uint8_t space_id[32]) {
     if (payload_len < 64 + sizeof(uint64_t) + 2) return;
 
@@ -322,6 +455,8 @@ static void parse_and_deliver_chat_msg(wex_p2p_node_t *node, const uint8_t *payl
 
 int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
     if (!node || node->udp_fd < 0) return -1;
+
+    wex_p2p_maintain(node, get_time_ms());
 
     struct pollfd pfd;
     pfd.fd = node->udp_fd;
@@ -462,14 +597,118 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
         }
 
         case WEX_PKT_PING: {
-            uint8_t pong_buf[sizeof(wex_pkt_hdr_t)];
+            uint8_t pong_buf[sizeof(wex_pkt_hdr_t) + sizeof(struct sockaddr_in)];
             wex_pkt_hdr_t *pong_hdr = (wex_pkt_hdr_t *)pong_buf;
             pong_hdr->magic = htonl(WEX_P2P_MAGIC);
             pong_hdr->type = WEX_PKT_PONG;
             memcpy(pong_hdr->sender_pk, node->identity->sign_pk, 32);
             memcpy(pong_hdr->space_id, hdr->space_id, 32);
-            pong_hdr->payload_len = 0;
+            pong_hdr->payload_len = htons((uint16_t)sizeof(struct sockaddr_in));
+            memcpy(pong_buf + sizeof(wex_pkt_hdr_t), &src_addr, sizeof(struct sockaddr_in));
             sendto(node->udp_fd, pong_buf, sizeof(pong_buf), 0,
+                   (struct sockaddr *)&src_addr, sizeof(src_addr));
+            break;
+        }
+
+        case WEX_PKT_PONG: {
+            if (payload_len >= sizeof(struct sockaddr_in)) {
+                if (!node->has_external_addr) {
+                    memcpy(&node->external_addr, payload, sizeof(struct sockaddr_in));
+                    node->has_external_addr = true;
+                }
+            }
+            break;
+        }
+
+        case WEX_PKT_NAT_PUNCH_REQ: {
+            if (payload_len < 32) break;
+            const uint8_t *target_pk = payload;
+
+            const struct sockaddr_in *target_addr = NULL;
+            for (size_t i = 0; i < node->peer_count; i++) {
+                if (node->peers[i].active && memcmp(node->peers[i].pk, target_pk, 32) == 0) {
+                    target_addr = &node->peers[i].addr;
+                    break;
+                }
+            }
+
+            if (target_addr) {
+                /* Trigger target to punch to caller */
+                uint8_t trig_to_b[sizeof(wex_pkt_hdr_t) + 32 + sizeof(struct sockaddr_in)];
+                wex_pkt_hdr_t *h_b = (wex_pkt_hdr_t *)trig_to_b;
+                h_b->magic = htonl(WEX_P2P_MAGIC);
+                h_b->type = WEX_PKT_NAT_PUNCH_TRIGGER;
+                memcpy(h_b->sender_pk, node->identity->sign_pk, 32);
+                memcpy(h_b->space_id, hdr->space_id, 32);
+                h_b->payload_len = htons(32 + sizeof(struct sockaddr_in));
+                memcpy(trig_to_b + sizeof(wex_pkt_hdr_t), hdr->sender_pk, 32);
+                memcpy(trig_to_b + sizeof(wex_pkt_hdr_t) + 32, &src_addr, sizeof(struct sockaddr_in));
+                sendto(node->udp_fd, trig_to_b, sizeof(trig_to_b), 0,
+                       (struct sockaddr *)target_addr, sizeof(*target_addr));
+
+                /* Trigger caller to punch to target */
+                uint8_t trig_to_a[sizeof(wex_pkt_hdr_t) + 32 + sizeof(struct sockaddr_in)];
+                wex_pkt_hdr_t *h_a = (wex_pkt_hdr_t *)trig_to_a;
+                h_a->magic = htonl(WEX_P2P_MAGIC);
+                h_a->type = WEX_PKT_NAT_PUNCH_TRIGGER;
+                memcpy(h_a->sender_pk, node->identity->sign_pk, 32);
+                memcpy(h_a->space_id, hdr->space_id, 32);
+                h_a->payload_len = htons(32 + sizeof(struct sockaddr_in));
+                memcpy(trig_to_a + sizeof(wex_pkt_hdr_t), target_pk, 32);
+                memcpy(trig_to_a + sizeof(wex_pkt_hdr_t) + 32, target_addr, sizeof(struct sockaddr_in));
+                sendto(node->udp_fd, trig_to_a, sizeof(trig_to_a), 0,
+                       (struct sockaddr *)&src_addr, sizeof(src_addr));
+            }
+            break;
+        }
+
+        case WEX_PKT_NAT_PUNCH_TRIGGER: {
+            if (payload_len < 32 + sizeof(struct sockaddr_in)) break;
+            const uint8_t *remote_pk = payload;
+            struct sockaddr_in remote_addr;
+            memcpy(&remote_addr, payload + 32, sizeof(struct sockaddr_in));
+
+            /* Send direct UDP punch probes */
+            uint8_t punch_pkt[sizeof(wex_pkt_hdr_t)];
+            wex_pkt_hdr_t *p_hdr = (wex_pkt_hdr_t *)punch_pkt;
+            p_hdr->magic = htonl(WEX_P2P_MAGIC);
+            p_hdr->type = WEX_PKT_NAT_PUNCH;
+            memcpy(p_hdr->sender_pk, node->identity->sign_pk, 32);
+            memcpy(p_hdr->space_id, hdr->space_id, 32);
+            p_hdr->payload_len = 0;
+
+            for (int k = 0; k < 3; k++) {
+                sendto(node->udp_fd, punch_pkt, sizeof(punch_pkt), 0,
+                       (struct sockaddr *)&remote_addr, sizeof(remote_addr));
+            }
+
+            /* Send HELLO to finalize connection */
+            find_or_add_peer(node, &remote_addr, remote_pk, "Peer");
+            uint8_t hello_buf[512];
+            wex_pkt_hdr_t *h_hdr = (wex_pkt_hdr_t *)hello_buf;
+            h_hdr->magic = htonl(WEX_P2P_MAGIC);
+            h_hdr->type = WEX_PKT_HELLO;
+            memcpy(h_hdr->sender_pk, node->identity->sign_pk, 32);
+            memcpy(h_hdr->space_id, node->active_space_id, 32);
+            size_t nlen = strlen(node->identity->nickname) + 1;
+            h_hdr->payload_len = htons((uint16_t)nlen);
+            memcpy(hello_buf + sizeof(wex_pkt_hdr_t), node->identity->nickname, nlen);
+            sendto(node->udp_fd, hello_buf, sizeof(wex_pkt_hdr_t) + nlen, 0,
+                   (struct sockaddr *)&remote_addr, sizeof(remote_addr));
+            break;
+        }
+
+        case WEX_PKT_NAT_PUNCH: {
+            uint8_t hello_buf[512];
+            wex_pkt_hdr_t *h_hdr = (wex_pkt_hdr_t *)hello_buf;
+            h_hdr->magic = htonl(WEX_P2P_MAGIC);
+            h_hdr->type = WEX_PKT_HELLO;
+            memcpy(h_hdr->sender_pk, node->identity->sign_pk, 32);
+            memcpy(h_hdr->space_id, node->active_space_id, 32);
+            size_t nlen = strlen(node->identity->nickname) + 1;
+            h_hdr->payload_len = htons((uint16_t)nlen);
+            memcpy(hello_buf + sizeof(wex_pkt_hdr_t), node->identity->nickname, nlen);
+            sendto(node->udp_fd, hello_buf, sizeof(wex_pkt_hdr_t) + nlen, 0,
                    (struct sockaddr *)&src_addr, sizeof(src_addr));
             break;
         }
@@ -514,14 +753,92 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
             if (payload_len < 1 + count * item_size) break;
 
             size_t off = 1;
+            wex_dht_contact_t disc_contacts[WEX_DHT_K];
+            size_t disc_count = 0;
+
             for (uint8_t i = 0; i < count; i++) {
                 const uint8_t *peer_id = payload + off;
                 off += 32;
-                const struct sockaddr_in *peer_addr = (const struct sockaddr_in *)(payload + off);
+                struct sockaddr_in peer_addr;
+                memcpy(&peer_addr, payload + off, sizeof(struct sockaddr_in));
                 off += sizeof(struct sockaddr_in);
 
-                /* Add/update discovered node in our Kademlia routing table! */
-                wex_dht_update_contact(&node->dht, peer_id, peer_addr, get_time_ms());
+                /* Add/update discovered node in our Kademlia routing table */
+                wex_dht_update_contact(&node->dht, peer_id, &peer_addr, get_time_ms());
+
+                if (disc_count < WEX_DHT_K) {
+                    memcpy(disc_contacts[disc_count].id, peer_id, 32);
+                    disc_contacts[disc_count].addr = peer_addr;
+                    disc_contacts[disc_count].last_seen_ms = get_time_ms();
+                    disc_count++;
+                }
+            }
+
+            /* Advance active iterative lookups */
+            for (size_t l = 0; l < node->lookup_count; l++) {
+                wex_dht_lookup_t *lk = &node->active_lookups[l];
+                if (!wex_dht_lookup_is_done(lk)) {
+                    wex_dht_lookup_add_candidates(lk, disc_contacts, disc_count);
+                    wex_dht_contact_t next_queries[WEX_DHT_ALPHA];
+                    size_t nq = wex_dht_lookup_get_next(lk, WEX_DHT_ALPHA, next_queries);
+                    for (size_t q = 0; q < nq; q++) {
+                        wex_p2p_send_find_node(node, &next_queries[q].addr, lk->target_id);
+                    }
+                }
+            }
+            break;
+        }
+
+        case WEX_PKT_DHT_ANNOUNCE: {
+            wex_dht_announce_topic(&node->dht, hdr->space_id, hdr->sender_pk, &src_addr, 3600000ULL);
+            break;
+        }
+
+        case WEX_PKT_DHT_GET_PROVIDERS: {
+            wex_dht_provider_t provs[16];
+            size_t pcount = wex_dht_get_topic_providers(&node->dht, hdr->space_id, provs, 16);
+
+            uint8_t resp_buf[WEX_MAX_UDP_PAYLOAD];
+            wex_pkt_hdr_t *r_hdr = (wex_pkt_hdr_t *)resp_buf;
+            r_hdr->magic = htonl(WEX_P2P_MAGIC);
+            r_hdr->type = WEX_PKT_DHT_PROVIDERS;
+            memcpy(r_hdr->sender_pk, node->identity->sign_pk, 32);
+            memcpy(r_hdr->space_id, hdr->space_id, 32);
+
+            uint8_t *out = resp_buf + sizeof(wex_pkt_hdr_t);
+            out[0] = (uint8_t)pcount;
+            size_t off = 1;
+            for (size_t i = 0; i < pcount; i++) {
+                memcpy(out + off, provs[i].peer_id, 32);
+                off += 32;
+                memcpy(out + off, &provs[i].addr, sizeof(struct sockaddr_in));
+                off += sizeof(struct sockaddr_in);
+            }
+            r_hdr->payload_len = htons((uint16_t)off);
+            sendto(node->udp_fd, resp_buf, sizeof(wex_pkt_hdr_t) + off, 0,
+                   (struct sockaddr *)&src_addr, sizeof(src_addr));
+            break;
+        }
+
+        case WEX_PKT_DHT_PROVIDERS: {
+            if (payload_len < 1) break;
+            uint8_t pcount = payload[0];
+            size_t item_sz = 32 + sizeof(struct sockaddr_in);
+            if (payload_len < 1 + pcount * item_sz) break;
+
+            size_t off = 1;
+            for (uint8_t i = 0; i < pcount; i++) {
+                const uint8_t *peer_id = payload + off;
+                off += 32;
+                struct sockaddr_in peer_addr;
+                memcpy(&peer_addr, payload + off, sizeof(struct sockaddr_in));
+                off += sizeof(struct sockaddr_in);
+
+                if (memcmp(peer_id, node->identity->sign_pk, 32) != 0) {
+                    char ip_buf[INET_ADDRSTRLEN];
+                    inet_ntop(AF_INET, &peer_addr.sin_addr, ip_buf, sizeof(ip_buf));
+                    wex_p2p_connect(node, ip_buf, ntohs(peer_addr.sin_port));
+                }
             }
             break;
         }

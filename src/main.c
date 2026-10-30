@@ -1,4 +1,5 @@
 #include "wex_ws_server.h"
+#include "wex_nat.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -58,7 +59,20 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* If peer argument provided (e.g. 127.0.0.1:9001), connect immediately */
+    /* WAN & NAT External Discovery via STUN RFC 5389 */
+    printf("[*] Probing external WAN endpoint via STUN...\n");
+    struct sockaddr_in ext_addr;
+    if (wex_nat_auto_discover(server.p2p.udp_fd, &ext_addr) == 0) {
+        char ext_str[64];
+        wex_addr_to_string(&ext_addr, ext_str, sizeof(ext_str));
+        server.p2p.external_addr = ext_addr;
+        server.p2p.has_external_addr = true;
+        printf("[+] External WAN Endpoint: %s (Publicly reachable over Internet)\n", ext_str);
+    } else {
+        printf("[*] External WAN: Operating behind local firewall / fallback to DHT relay\n");
+    }
+
+    /* If peer argument provided (e.g. 1.2.3.4:9001 or node.domain.com:9001), connect immediately */
     if (peer_target) {
         char ip_buf[128];
         strncpy(ip_buf, peer_target, sizeof(ip_buf) - 1);
