@@ -33,6 +33,7 @@ set(WEX_CORE_SOURCES
     src/net/wex_ws_server.c
     src/net/wex_p2p.c
     src/net/wex_nat.c
+    src/net/wex_voice.c
     src/storage/wex_store.c
     src/storage/wex_persist.c
     src/storage/wex_blob.c
@@ -91,3 +92,7 @@ add_test(NAME test_blob COMMAND test_blob)
 add_executable(test_config tests/test_config.c)
 target_link_libraries(test_config wex_core)
 add_test(NAME test_config COMMAND test_config)
+
+add_executable(test_voice tests/test_voice.c)
+target_link_libraries(test_voice wex_core)
+add_test(NAME test_voice COMMAND test_voice)
