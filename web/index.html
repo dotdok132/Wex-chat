@@ -3,29 +3,56 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Wex-Chat | Sovereign P2P</title>
+  <meta name="theme-color" content="#0a0b0d">
+  <title>WEX // PROTOCOL — Sovereign Cryptographic Messenger</title>
   <style>
     :root {
-      --bg-darkest: #1e1f22;
-      --bg-darker: #2b2d31;
-      --bg-dark: #313338;
-      --bg-light: #383a40;
-      --bg-hover: #404249;
-      --accent: #5865f2;
-      --accent-hover: #4752c4;
-      --text-normal: #dbdee1;
-      --text-bright: #f2f3f5;
-      --text-muted: #949ba4;
-      --green: #23a55a;
-      --danger: #da373c;
-      --border: rgba(255, 255, 255, 0.06);
+      /* Obsidian Carbon Palette */
+      --bg-void: #0a0b0d;
+      --bg-surface: #111317;
+      --bg-elevated: #181b20;
+      --bg-interactive: #1e2229;
+      --bg-active: #252a34;
+
+      /* Structural Hairlines */
+      --line: #22262e;
+      --line-strong: #2f3542;
+
+      /* Typography */
+      --text-primary: #eceef2;
+      --text-secondary: #b4bac6;
+      --text-muted: #7d8594;
+      --text-dim: #525866;
+
+      /* Cryptographic Telemetry Signals */
+      --sig-emerald: #10b981;
+      --sig-emerald-dim: rgba(16, 185, 129, 0.12);
+      --sig-emerald-border: rgba(16, 185, 129, 0.32);
+
+      --sig-amber: #f59e0b;
+      --sig-amber-dim: rgba(245, 158, 11, 0.12);
+      --sig-amber-border: rgba(245, 158, 11, 0.32);
+
+      --sig-crimson: #ef4444;
+      --sig-crimson-dim: rgba(239, 68, 68, 0.12);
+      --sig-crimson-border: rgba(239, 68, 68, 0.32);
+
+      /* Fonts */
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+      /* Safe Areas & Dimensions */
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --master-width: 320px;
+      --header-height: 54px;
+      --tabbar-height: 56px;
     }
 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       -webkit-tap-highlight-color: transparent;
     }
 
@@ -33,541 +60,1005 @@
       width: 100%;
       height: 100%;
       height: 100dvh;
-      background: var(--bg-darkest);
-      color: var(--text-normal);
+      background-color: var(--bg-void);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.45;
       overflow: hidden;
       overscroll-behavior: none;
+      -webkit-font-smoothing: antialiased;
     }
 
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--line-strong);
+      border-radius: 2px;
+    }
+
+    button, input, textarea {
+      font-family: inherit;
+      color: inherit;
+    }
+
+    /* =========================================================================
+       ROOT APPLICATION SHELL (2-Column Split >= 768px, Master-Detail Stack < 768px)
+       ========================================================================= */
     #app-root {
       display: flex;
       width: 100%;
       height: 100%;
-      background: var(--bg-dark);
+      background: var(--bg-void);
+      position: relative;
       overflow: hidden;
+    }
+
+    /* LEFT / MASTER PANE: Navigation, Contacts, Swarms, Telemetry, Key Identity */
+    #master-pane {
+      width: var(--master-width);
+      height: 100%;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      z-index: 20;
       position: relative;
     }
 
-    /* Unified Left Navigation Drawer (Guilds + Channels) */
-    #nav-drawer {
-      display: flex;
+    /* RIGHT / DETAIL PANE: Active E2EE DM or Swarm Conversation */
+    #detail-pane {
+      flex: 1;
+      min-width: 0;
       height: 100%;
-      flex-shrink: 0;
-      background: var(--bg-darker);
-      z-index: 200;
-    }
-
-    /* Guilds / Spaces Bar */
-    #guilds-bar {
-      width: 72px;
-      height: 100%;
-      background: var(--bg-darkest);
+      background: var(--bg-void);
       display: flex;
       flex-direction: column;
-      align-items: center;
-      padding: 12px 0;
-      gap: 10px;
-      overflow-y: auto;
-      flex-shrink: 0;
+      z-index: 30;
+      position: relative;
     }
 
-    .guild-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 24px;
-      background: var(--bg-darker);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 16px;
-      cursor: pointer;
-      transition: all 0.18s ease;
-      color: var(--text-normal);
-      user-select: none;
-      flex-shrink: 0;
-    }
-    .guild-icon:hover, .guild-icon.active {
-      border-radius: 15px;
-      background: var(--accent);
-      color: #fff;
-    }
-    .guild-icon.add-btn {
-      background: var(--bg-light);
-      color: var(--green);
-      font-size: 24px;
-      font-weight: 500;
-    }
-    .guild-icon.add-btn:hover, .guild-icon.add-btn:active {
-      background: var(--green);
-      color: #fff;
-      border-radius: 15px;
-    }
-
-    /* Channels & Peers Column */
-    #channels-bar {
-      width: 256px;
-      height: 100%;
-      background: var(--bg-darker);
-      display: flex;
-      flex-direction: column;
-      border-right: 1px solid var(--border);
-      flex-shrink: 0;
-    }
-
-    .server-header {
-      height: 52px;
-      border-bottom: 1px solid var(--bg-darkest);
+    /* =========================================================================
+       MASTER PANE TOP BAR (Protocol Identity & Live Node Pulse)
+       ========================================================================= */
+    .protocol-topbar {
+      height: var(--header-height);
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 14px;
-      font-weight: 700;
-      font-size: 15px;
-      color: var(--text-bright);
+      background: var(--bg-void);
       flex-shrink: 0;
     }
-    .drawer-close-btn {
-      display: none;
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      font-size: 20px;
-      padding: 4px 8px;
-      cursor: pointer;
+
+    .protocol-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
     }
 
-    /* Single Unified Scrollable Sidebar Area */
-    #sidebar-scroll {
-      flex: 1;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      padding: 8px 8px 16px 8px;
+    .node-pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--sig-emerald);
+      box-shadow: 0 0 8px var(--sig-emerald);
+      flex-shrink: 0;
+    }
+    .node-pulse-dot.amber {
+      background: var(--sig-amber);
+      box-shadow: 0 0 8px var(--sig-amber);
+    }
+    .node-pulse-dot.crimson {
+      background: var(--sig-crimson);
+      box-shadow: 0 0 8px var(--sig-crimson);
+    }
+
+    .brand-titles {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      min-width: 0;
+    }
+
+    .brand-title {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .brand-subtitle {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-identity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      max-width: 130px;
+    }
+    .topbar-identity-chip:hover {
+      border-color: var(--line-strong);
+      background: var(--bg-interactive);
+    }
+    .chip-avatar {
+      width: 18px;
+      height: 18px;
+      border-radius: 3px;
+      background: var(--sig-emerald-dim);
+      border: 1px solid var(--sig-emerald-border);
+      color: var(--sig-emerald);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .chip-nick {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* =========================================================================
+       MODE SWITCHER (Top Segmented Control on Desktop, Bottom Tab Bar on Mobile)
+       ========================================================================= */
+    #mode-nav-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--bg-void);
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+
+    .mode-tab-btn {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 10px 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+      position: relative;
+      user-select: none;
+    }
+    .mode-tab-btn:hover {
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .mode-tab-btn.active {
+      color: var(--sig-emerald);
+      border-bottom-color: var(--sig-emerald);
+      background: var(--sig-emerald-dim);
+    }
+    .mode-tab-code {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .mode-tab-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .mode-tab-badge {
+      position: absolute;
+      top: 5px;
+      right: 8px;
+      min-width: 15px;
+      height: 15px;
+      padding: 0 4px;
+      border-radius: 3px;
+      background: var(--sig-emerald);
+      color: var(--bg-void);
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .mode-tab-badge.visible {
+      display: inline-flex;
+    }
+
+    /* =========================================================================
+       PERSISTENT VOICE STATUS BANNER (When UDP Voice Relay is Connected)
+       ========================================================================= */
+    .voice-status-bar {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--sig-emerald-dim);
+      border-bottom: 1px solid var(--sig-emerald-border);
+      flex-shrink: 0;
+    }
+    .voice-status-bar.active {
+      display: flex;
+    }
+    .voice-conn-info {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+    .voice-conn-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--sig-emerald);
+      letter-spacing: 0.04em;
+    }
+    .voice-conn-sub {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-secondary);
+    }
+
+    /* =========================================================================
+       TAB PANELS CONTAINER
+       ========================================================================= */
+    #master-panels {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tab-panel {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 12px;
+      gap: 14px;
+    }
+    .tab-panel.active {
+      display: flex;
+    }
+
+    /* Shared UI Primitives inside Panels */
+    .panel-action-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.14s, border-color 0.14s, color 0.14s;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .btn:hover, .btn:active {
+      background: var(--bg-interactive);
+      border-color: var(--text-muted);
+    }
+    .btn.primary {
+      background: var(--sig-emerald-dim);
+      border-color: var(--sig-emerald-border);
+      color: var(--sig-emerald);
+    }
+    .btn.primary:hover, .btn.primary:active {
+      background: var(--sig-emerald);
+      border-color: var(--sig-emerald);
+      color: var(--bg-void);
+    }
+    .btn.amber {
+      background: var(--sig-amber-dim);
+      border-color: var(--sig-amber-border);
+      color: var(--sig-amber);
+    }
+    .btn.danger {
+      background: var(--sig-crimson-dim);
+      border-color: var(--sig-crimson-border);
+      color: var(--sig-crimson);
+    }
+    .btn.full {
+      width: 100%;
+    }
+    .btn.mono {
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .section-block {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
 
     .section-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 12px 6px 4px 6px;
+      padding: 2px 2px 4px 2px;
+      border-bottom: 1px solid var(--line);
     }
+
     .section-title {
-      font-size: 11px;
+      font-family: var(--font-mono);
+      font-size: 10px;
       font-weight: 700;
       color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.4px;
-    }
-    .section-add-btn {
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      font-size: 18px;
-      font-weight: 700;
-      line-height: 1;
-      padding: 2px 6px;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    .section-add-btn:hover, .section-add-btn:active {
-      background: var(--bg-light);
-      color: #fff;
+      letter-spacing: 0.08em;
     }
 
-    .sidebar-group {
+    .section-action-btn {
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      cursor: pointer;
+    }
+    .section-action-btn:hover {
+      border-color: var(--sig-emerald-border);
+      color: var(--sig-emerald);
+    }
+
+    .item-list {
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 4px;
+    }
+
+    .empty-list-hint {
+      padding: 12px 10px;
+      background: var(--bg-void);
+      border: 1px dashed var(--line);
+      border-radius: 4px;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* =========================================================================
+       TAB 1: DM / CONTACTS (Primary Default View)
+       ========================================================================= */
+    .contact-card, .peer-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+      user-select: none;
+    }
+    .contact-card:hover, .peer-item:hover {
+      background: var(--bg-elevated);
+      border-color: var(--line-strong);
+    }
+    .contact-card.active, .channel-item.active {
+      background: var(--bg-elevated);
+      border-color: var(--sig-emerald);
+      box-shadow: inset 2px 0 0 var(--sig-emerald);
+    }
+
+    .contact-left, .peer-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .contact-monogram {
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .peer-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--sig-emerald);
+      flex-shrink: 0;
+    }
+    .peer-dot.offline {
+      background: var(--text-dim);
+    }
+
+    .contact-meta {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .contact-name, .peer-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .contact-pk-preview {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .crypto-tag {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 5px;
+      border-radius: 3px;
+      background: var(--sig-emerald-dim);
+      border: 1px solid var(--sig-emerald-border);
+      color: var(--sig-emerald);
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+
+    /* =========================================================================
+       TAB 2: SWARMS (Decentralized Group Spaces & Channels)
+       ========================================================================= */
+    .swarm-switcher-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .swarm-pill {
+      padding: 6px 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.12s;
+    }
+    .swarm-pill:hover {
+      border-color: var(--line-strong);
+      color: var(--text-primary);
+    }
+    .swarm-pill.active {
+      background: var(--sig-emerald-dim);
+      border-color: var(--sig-emerald);
+      color: var(--sig-emerald);
+    }
+    .swarm-pill.add-btn {
+      border-style: dashed;
+      color: var(--text-muted);
+    }
+
+    .swarm-header-card {
+      padding: 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .swarm-active-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .swarm-active-id {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
     }
 
     .channel-item {
       display: flex;
       align-items: center;
-      min-height: 38px;
-      padding: 7px 10px;
-      border-radius: 6px;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
       cursor: pointer;
-      color: var(--text-muted);
-      font-size: 14px;
+      color: var(--text-secondary);
+      font-size: 13px;
+      transition: background 0.12s, border-color 0.12s;
       user-select: none;
-      transition: background 0.12s;
     }
-    .channel-item:hover, .channel-item:active {
-      background: var(--bg-light);
-      color: var(--text-normal);
-    }
-    .channel-item.active {
-      background: var(--bg-hover);
-      color: #fff;
-      font-weight: 600;
+    .channel-item:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
     }
     .channel-item.text-ch::before {
-      content: '#';
-      margin-right: 8px;
-      font-size: 17px;
-      font-weight: 500;
+      content: '//';
+      font-family: var(--font-mono);
+      font-size: 11px;
       color: var(--text-muted);
+      margin-right: 8px;
+    }
+    .channel-item.active {
+      color: var(--text-primary);
+      font-weight: 600;
     }
 
-    /* Voice Channel Item */
     .voice-channel {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      min-height: 38px;
-      padding: 7px 10px;
-      border-radius: 6px;
+      padding: 9px 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
       cursor: pointer;
-      color: var(--text-muted);
-      font-size: 14px;
-      user-select: none;
+      font-size: 13px;
+      color: var(--text-secondary);
+      transition: all 0.12s;
     }
-    .voice-channel:hover, .voice-channel:active {
-      background: var(--bg-light);
-      color: var(--text-normal);
+    .voice-channel:hover {
+      background: var(--bg-elevated);
+      border-color: var(--line-strong);
     }
     .voice-channel.connected {
-      color: var(--green);
+      background: var(--sig-emerald-dim);
+      border-color: var(--sig-emerald);
+      color: var(--sig-emerald);
       font-weight: 600;
-      background: rgba(35, 165, 90, 0.14);
     }
 
-    /* Peers List */
-    .peer-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      min-height: 38px;
-      padding: 6px 10px;
-      border-radius: 6px;
-      font-size: 13px;
-      color: var(--text-normal);
-      cursor: pointer;
-    }
-    .peer-item:hover, .peer-item:active {
-      background: var(--bg-light);
-    }
-    .peer-left {
-      display: flex;
-      align-items: center;
+    /* =========================================================================
+       TAB 3: NETWORK / P2P NODE TELEMETRY
+       ========================================================================= */
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 8px;
-      overflow: hidden;
-    }
-    .peer-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: var(--green);
-      flex-shrink: 0;
-    }
-    .peer-name {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .dm-badge {
-      font-size: 11px;
-      background: var(--accent);
-      color: #fff;
-      padding: 3px 7px;
-      border-radius: 5px;
-      font-weight: 600;
-      flex-shrink: 0;
     }
 
-    /* Voice Status Bar */
-    .voice-status-bar {
-      background: #111214;
-      padding: 8px 12px;
-      border-top: 1px solid var(--bg-darkest);
-      display: none;
-      align-items: center;
-      justify-content: space-between;
-      flex-shrink: 0;
-    }
-    .voice-status-bar.active { display: flex; }
-    .voice-conn-title { font-size: 12px; color: var(--green); font-weight: 700; }
-    .voice-conn-sub { font-size: 10px; color: var(--text-muted); }
-
-    /* User Footer */
-    .user-footer {
-      height: 56px;
-      background: #232428;
-      display: flex;
-      align-items: center;
-      padding: 0 10px;
-      gap: 10px;
-      cursor: pointer;
-      flex-shrink: 0;
-      border-top: 1px solid var(--border);
-    }
-    .user-footer:hover, .user-footer:active {
-      background: #292b2f;
-    }
-    .user-avatar {
-      width: 34px;
-      height: 34px;
-      border-radius: 50%;
-      background: var(--accent);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 14px;
-      color: #fff;
-      flex-shrink: 0;
-    }
-    .user-info { flex: 1; overflow: hidden; }
-    .user-name {
-      font-size: 13px;
-      font-weight: 700;
-      color: var(--text-bright);
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden;
-    }
-    .user-status {
-      font-size: 11px;
-      color: var(--green);
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden;
-    }
-    .settings-gear {
-      width: 32px;
-      height: 32px;
-      border-radius: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--text-muted);
-      font-size: 17px;
-      flex-shrink: 0;
-    }
-
-    /* Main Chat Area */
-    #chat-area {
-      flex: 1;
-      min-width: 0;
-      height: 100%;
+    .telemetry-card {
+      padding: 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
       display: flex;
       flex-direction: column;
-      background: var(--bg-dark);
+      gap: 4px;
+    }
+    .telemetry-card.full {
+      grid-column: 1 / -1;
+    }
+    .telemetry-label {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .telemetry-value {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      word-break: break-all;
+    }
+    .telemetry-value.emerald {
+      color: var(--sig-emerald);
+    }
+    .telemetry-value.amber {
+      color: var(--sig-amber);
     }
 
-    .chat-header {
-      height: 52px;
-      border-bottom: 1px solid var(--bg-darkest);
+    /* =========================================================================
+       TAB 4: KEY / CRYPTOGRAPHIC IDENTITY & SEED VAULT
+       ========================================================================= */
+    .field-group {
       display: flex;
-      align-items: center;
-      padding: 0 12px;
-      gap: 8px;
-      flex-shrink: 0;
-      background: var(--bg-dark);
+      flex-direction: column;
+      gap: 5px;
     }
-    .menu-toggle {
-      display: none;
-      background: var(--bg-light);
-      border: none;
-      color: var(--text-bright);
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      font-size: 20px;
+    .field-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .text-input {
+      width: 100%;
+      background: var(--bg-void);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 9px 10px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.14s;
+    }
+    .text-input.mono {
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .text-input:focus {
+      border-color: var(--sig-emerald);
+    }
+
+    .code-box {
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 9px 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+      word-break: break-all;
+      line-height: 1.45;
+      user-select: all;
+    }
+    .code-box.masked {
+      filter: blur(4px);
+      user-select: none;
       cursor: pointer;
+      transition: filter 0.18s;
+    }
+    .code-box.masked.revealed {
+      filter: none;
+      user-select: all;
+    }
+
+    .qr-container {
+      display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+      padding: 12px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      gap: 8px;
+    }
+    #profile-qr-canvas {
+      width: 168px;
+      height: 168px;
+      background: #ffffff;
+      border-radius: 4px;
+      padding: 6px;
+      display: block;
+    }
+    .qr-caption {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    /* =========================================================================
+       DETAIL PANE: CONVERSATION HEADER, FEED & COMPOSER
+       ========================================================================= */
+    .chat-header {
+      height: var(--header-height);
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
       flex-shrink: 0;
     }
-    .chat-title-wrap {
+
+    .chat-header-left {
       display: flex;
-      align-items: baseline;
-      gap: 6px;
+      align-items: center;
+      gap: 10px;
       min-width: 0;
       flex: 1;
-      overflow: hidden;
     }
-    #active-channel-name {
-      color: var(--text-bright);
-      font-weight: 700;
-      font-size: 15px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    #active-channel-topic {
-      color: var(--text-muted);
+
+    /* Back button: Hidden on >= 768px, Prominent on < 768px */
+    #btn-back-to-list {
+      display: none;
+      align-items: center;
+      gap: 5px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-family: var(--font-mono);
       font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    #btn-back-to-list:active {
+      background: var(--bg-interactive);
+      border-color: var(--sig-emerald);
+    }
+
+    .chat-title-stack {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .chat-title-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    #channel-prefix {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--sig-emerald-dim);
+      border: 1px solid var(--sig-emerald-border);
+      color: var(--sig-emerald);
+      flex-shrink: 0;
+    }
+
+    #active-channel-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
-    .header-btns {
+    #active-channel-topic {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-header-actions {
       display: flex;
       align-items: center;
       gap: 6px;
       flex-shrink: 0;
     }
-    .btn {
-      background: var(--accent);
-      border: none;
-      padding: 8px 12px;
-      border-radius: 6px;
-      color: #fff;
-      cursor: pointer;
-      font-size: 12px;
-      font-weight: 600;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 5px;
-      white-space: nowrap;
-    }
-    .btn:hover, .btn:active { background: var(--accent-hover); }
-    .btn.secondary { background: var(--bg-light); color: var(--text-normal); }
-    .btn.secondary:hover, .btn.secondary:active { background: var(--bg-hover); color: #fff; }
-    .btn.green { background: var(--green); color: #fff; }
 
-    /* Messages Feed */
+    /* Messages Stream */
     .messages-feed {
       flex: 1;
-      padding: 14px 12px;
+      padding: 16px 14px;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       display: flex;
       flex-direction: column;
-      gap: 12px;
-    }
-    .empty-state {
-      margin: auto;
-      text-align: center;
-      max-width: 320px;
-      color: var(--text-muted);
-      padding: 20px;
-    }
-    .empty-state h3 {
-      color: var(--text-bright);
-      font-size: 16px;
-      margin-bottom: 6px;
-    }
-    .empty-state p {
-      font-size: 13px;
-      line-height: 1.45;
+      gap: 10px;
+      background: var(--bg-void);
     }
 
+    .empty-state {
+      margin: auto;
+      max-width: 380px;
+      padding: 24px 20px;
+      background: var(--bg-surface);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .empty-state-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--sig-emerald);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .empty-state h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .empty-state p {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Individual Message Packet Row */
     .msg-group {
       display: flex;
       gap: 10px;
+      padding: 8px 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      transition: border-color 0.12s;
       position: relative;
-      padding: 4px 6px;
-      border-radius: 8px;
-      transition: background 0.12s;
     }
     .msg-group:hover, .msg-group.selected {
-      background: rgba(0, 0, 0, 0.12);
+      border-color: var(--line-strong);
     }
+    .msg-group.mine {
+      border-left: 2px solid var(--sig-emerald);
+    }
+
     .msg-avatar {
-      width: 38px;
-      height: 38px;
-      border-radius: 50%;
-      background: #e67e22;
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-weight: 700;
-      font-size: 15px;
-      color: #fff;
       flex-shrink: 0;
     }
+
     .msg-body {
       flex: 1;
       min-width: 0;
     }
+
     .msg-meta {
       display: flex;
       align-items: center;
       flex-wrap: wrap;
       gap: 6px;
-      margin-bottom: 3px;
+      margin-bottom: 4px;
     }
-    .msg-author { font-weight: 700; font-size: 14px; color: #fff; }
-    .msg-time { font-size: 11px; color: var(--text-muted); }
+
+    .msg-author {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .verified-badge {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 2px;
+      background: var(--sig-emerald-dim);
+      border: 1px solid var(--sig-emerald-border);
+      color: var(--sig-emerald);
+    }
+
+    .e2ee-badge {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 2px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      color: var(--text-secondary);
+    }
+
+    .msg-time {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
     .msg-content {
       font-size: 14px;
-      line-height: 1.42;
-      color: var(--text-normal);
+      line-height: 1.48;
+      color: var(--text-primary);
       word-break: break-word;
-    }
-    .verified-badge {
-      background: rgba(35, 165, 90, 0.2);
-      color: #23a55a;
-      border-radius: 4px;
-      font-size: 10px;
-      padding: 1px 5px;
-      font-weight: 700;
-    }
-    .e2ee-badge {
-      background: rgba(88, 101, 242, 0.2);
-      color: #8ea1e1;
-      border-radius: 4px;
-      font-size: 10px;
-      padding: 1px 5px;
-      font-weight: 700;
     }
 
     .attachment-card {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      background: var(--bg-darkest);
-      padding: 8px 12px;
-      border-radius: 6px;
+      background: var(--bg-void);
+      padding: 7px 11px;
+      border-radius: 4px;
       margin-top: 6px;
-      border: 1px solid var(--bg-light);
-      text-decoration: none;
-      color: var(--text-normal);
+      border: 1px solid var(--line-strong);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-primary);
       cursor: pointer;
       max-width: 100%;
     }
+    .attachment-card:hover {
+      border-color: var(--sig-emerald);
+    }
     .attachment-preview img {
-      max-width: min(320px, 100%);
+      max-width: min(300px, 100%);
       max-height: 220px;
-      border-radius: 8px;
+      border-radius: 4px;
       margin-top: 6px;
       display: block;
-      border: 1px solid var(--bg-light);
-    }
-
-    .msg-actions {
-      display: none;
-      gap: 4px;
-      margin-top: 6px;
-      background: var(--bg-darker);
-      border: 1px solid var(--bg-light);
-      border-radius: 8px;
-      padding: 3px 6px;
-      width: fit-content;
-    }
-    .msg-group:hover .msg-actions,
-    .msg-group.selected .msg-actions {
-      display: flex;
-    }
-    .action-btn {
-      background: none;
-      border: none;
-      font-size: 14px;
-      cursor: pointer;
-      padding: 4px 6px;
-      border-radius: 4px;
-      color: var(--text-muted);
-    }
-    .action-btn:hover, .action-btn:active {
-      background: var(--bg-light);
-      color: #fff;
+      border: 1px solid var(--line);
     }
 
     .reaction-bar {
@@ -575,152 +1066,180 @@
       flex-wrap: wrap;
       gap: 6px;
       margin-top: 4px;
-      font-size: 12px;
-      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--sig-emerald);
     }
 
-    /* Bottom Input Box */
+    .msg-actions {
+      display: none;
+      gap: 4px;
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid var(--line);
+    }
+    .msg-group:hover .msg-actions,
+    .msg-group.selected .msg-actions {
+      display: flex;
+    }
+    .action-btn {
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 3px 7px;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+    .action-btn:hover {
+      border-color: var(--sig-emerald);
+      color: var(--text-primary);
+    }
+
+    /* Message Composer Bar */
     .input-box {
-      padding: 10px 12px;
-      background: var(--bg-dark);
-      border-top: 1px solid var(--border);
+      padding: 10px 14px calc(10px + var(--safe-bottom)) 14px;
+      background: var(--bg-surface);
+      border-top: 1px solid var(--line);
       flex-shrink: 0;
     }
+
     .input-wrapper {
-      background: var(--bg-light);
-      border-radius: 10px;
-      padding: 6px 8px 6px 10px;
       display: flex;
       align-items: center;
       gap: 8px;
+      background: var(--bg-void);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 5px 6px 5px 10px;
+      transition: border-color 0.14s;
     }
-    .input-wrapper input[type="text"] {
+    .input-wrapper:focus-within {
+      border-color: var(--sig-emerald);
+    }
+
+    .attach-btn {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .attach-btn:hover {
+      border-color: var(--text-muted);
+      color: var(--text-primary);
+    }
+
+    #msg-input {
       flex: 1;
       min-width: 0;
       background: transparent;
       border: none;
       outline: none;
-      color: #fff;
-      font-size: 15px;
+      color: var(--text-primary);
+      font-size: 14px;
       padding: 6px 0;
     }
-    .input-wrapper input[type="text"]::placeholder { color: var(--text-muted); }
-    .attach-btn {
-      background: none;
-      border: none;
-      font-size: 20px;
-      cursor: pointer;
+    #msg-input::placeholder {
       color: var(--text-muted);
-      width: 34px;
-      height: 34px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
     }
+
     .send-btn {
-      background: var(--accent);
-      border: none;
-      border-radius: 8px;
-      color: #fff;
-      font-size: 15px;
+      background: var(--sig-emerald);
+      border: 1px solid var(--sig-emerald);
+      border-radius: 3px;
+      color: var(--bg-void);
+      font-family: var(--font-mono);
+      font-size: 11px;
       font-weight: 700;
-      width: 38px;
-      height: 36px;
+      padding: 0 12px;
+      height: 32px;
       cursor: pointer;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
+      letter-spacing: 0.04em;
       flex-shrink: 0;
     }
-    .send-btn:active { background: var(--accent-hover); }
-
-    /* Mobile & Tablet Backdrop */
-    #drawer-backdrop {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.65);
-      z-index: 150;
-      backdrop-filter: blur(2px);
+    .send-btn:active {
+      opacity: 0.85;
     }
 
-    /* Modals */
+    /* =========================================================================
+       MODALS & TOAST NOTIFICATION
+       ========================================================================= */
     .modal-overlay {
       display: none;
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.72);
+      background: rgba(5, 6, 8, 0.82);
       z-index: 400;
       align-items: center;
       justify-content: center;
       padding: 16px;
     }
-    .modal-overlay.open { display: flex; }
+    .modal-overlay.open {
+      display: flex;
+    }
+
     .modal-card {
-      background: var(--bg-darker);
-      border: 1px solid var(--bg-light);
-      border-radius: 12px;
       width: 100%;
-      max-width: 440px;
+      max-width: 420px;
       max-height: 90dvh;
       overflow-y: auto;
-      padding: 18px;
-      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+      background: var(--bg-surface);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 14px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75);
     }
+
     .modal-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
     }
+
     .modal-title {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--text-bright);
-    }
-    .modal-close {
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      font-size: 20px;
-      cursor: pointer;
-      padding: 2px 6px;
-    }
-    .field-label {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      margin-bottom: 5px;
-      display: block;
-    }
-    .modal-input {
-      width: 100%;
-      background: var(--bg-darkest);
-      border: 1px solid var(--bg-light);
-      border-radius: 8px;
-      padding: 10px 12px;
-      color: #fff;
-      font-size: 14px;
-      outline: none;
-    }
-    .modal-input:focus { border-color: var(--accent); }
-    .code-box {
-      background: var(--bg-darkest);
-      border: 1px solid var(--bg-light);
-      border-radius: 8px;
-      padding: 10px;
-      font-family: monospace;
+      font-family: var(--font-mono);
       font-size: 12px;
-      color: #a9b1d6;
-      word-break: break-all;
-      line-height: 1.4;
-      max-height: 92px;
-      overflow-y: auto;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-primary);
     }
+
+    .modal-close {
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      width: 26px;
+      height: 26px;
+      cursor: pointer;
+    }
+    .modal-close:hover {
+      color: var(--text-primary);
+      border-color: var(--line-strong);
+    }
+
     .modal-actions {
       display: flex;
       gap: 8px;
@@ -728,968 +1247,2122 @@
     }
     .modal-actions .btn {
       flex: 1;
-      min-height: 40px;
-      font-size: 13px;
+      min-height: 38px;
     }
 
-    /* Toast Notification */
     #toast {
       position: fixed;
-      top: 14px;
+      top: calc(12px + var(--safe-top));
       left: 50%;
-      transform: translateX(-50%) translateY(-80px);
-      background: var(--green);
-      color: #fff;
-      padding: 9px 16px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      transform: translateX(-50%) translateY(-90px);
+      background: var(--bg-elevated);
+      border: 1px solid var(--sig-emerald);
+      color: var(--sig-emerald);
+      padding: 8px 14px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
       z-index: 600;
-      transition: transform 0.22s ease;
+      transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
       pointer-events: none;
     }
     #toast.show {
       transform: translateX(-50%) translateY(0);
     }
 
-    /* Tablet Portrait & Mobile Responsive Breakpoints */
-    @media (max-width: 900px) {
-      .menu-toggle { display: inline-flex; }
-      .drawer-close-btn { display: block; }
-      #nav-drawer {
-        position: fixed;
-        top: 0;
-        bottom: 0;
-        left: 0;
-        width: min(88vw, 328px);
-        transform: translateX(-104%);
-        transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
-        box-shadow: 8px 0 24px rgba(0, 0, 0, 0.6);
+    /* =========================================================================
+       NATIVE PHONE MASTER-DETAIL STACK (< 768px)
+       ========================================================================= */
+    @media (max-width: 767px) {
+      #master-pane {
+        width: 100%;
+        height: 100%;
+        border-right: none;
+        /* Reorder Mode Switcher to the bottom of the screen like native mobile apps */
       }
-      #channels-bar {
-        flex: 1;
-        width: auto;
-        min-width: 0;
-      }
-      body.drawer-open #nav-drawer {
-        transform: translateX(0);
-      }
-      body.drawer-open #drawer-backdrop {
-        display: block;
-      }
-      #active-channel-topic { display: none; }
-    }
 
-    @media (min-width: 901px) and (max-width: 1180px) {
-      #guilds-bar { width: 64px; }
-      #channels-bar { width: 220px; }
+      #mode-nav-bar {
+        order: 10;
+        border-bottom: none;
+        border-top: 1px solid var(--line);
+        padding-bottom: var(--safe-bottom);
+        min-height: calc(var(--tabbar-height) + var(--safe-bottom));
+      }
+
+      .mode-tab-btn {
+        border-bottom: none;
+        border-top: 2px solid transparent;
+        padding: 8px 4px;
+      }
+      .mode-tab-btn.active {
+        border-bottom-color: transparent;
+        border-top-color: var(--sig-emerald);
+      }
+
+      /* Detail Pane is fullscreen overlay that slides in when body.chat-active is set */
+      #detail-pane {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        transform: translateX(100%);
+        transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+        pointer-events: none;
+      }
+
+      body.chat-active #detail-pane {
+        transform: translateX(0);
+        pointer-events: auto;
+      }
+
+      #btn-back-to-list {
+        display: inline-flex;
+      }
+
+      #active-channel-topic {
+        display: none;
+      }
     }
   </style>
 </head>
 <body>
-  <div id="toast">Скопировано!</div>
-  <div id="drawer-backdrop" onclick="toggleMobileDrawer(false)"></div>
+  <!-- Cryptographic Telemetry Toast -->
+  <div id="toast" role="status" aria-live="polite">СКОПИРОВАНО В БУФЕР</div>
 
   <div id="app-root">
-    <!-- Left Navigation Drawer (Guilds + Channels/Peers/Profile) -->
-    <aside id="nav-drawer">
-      <div id="guilds-bar">
-        <div class="guild-icon active" id="space-avatar">W</div>
-        <div class="guild-icon add-btn" title="Создать сообщество" onclick="openInputModal('create_space')">+</div>
+    <!-- =====================================================================
+         LEFT / MASTER PANE: Navigation, Contacts (DM), Swarms, Network, Key
+         ===================================================================== -->
+    <aside id="master-pane">
+      <!-- Protocol Header -->
+      <header class="protocol-topbar">
+        <div class="protocol-brand">
+          <span class="node-pulse-dot" id="node-pulse-indicator"></span>
+          <div class="brand-titles">
+            <span class="brand-title">WEX // PROTOCOL</span>
+            <span class="brand-subtitle" id="my-node-status">INIT DAEMON...</span>
+          </div>
+        </div>
+        <button class="topbar-identity-chip" id="btn-quick-profile" onclick="switchModeTab('key')" title="Ключ и профиль">
+          <span class="chip-avatar" id="my-avatar">W</span>
+          <span class="chip-nick" id="my-nickname">Node</span>
+        </button>
+      </header>
+
+      <!-- Mode Switcher (Docked Top on Desktop >=768px, Docked Bottom on Mobile <768px) -->
+      <nav id="mode-nav-bar" aria-label="Режимы протокола">
+        <button class="mode-tab-btn active" id="tab-btn-dms" data-tab="dms" onclick="switchModeTab('dms')">
+          <span class="mode-tab-code">[01]</span>
+          <span class="mode-tab-label">ЛС</span>
+          <span class="mode-tab-badge" id="badge-dms">0</span>
+        </button>
+        <button class="mode-tab-btn" id="tab-btn-swarms" data-tab="swarms" onclick="switchModeTab('swarms')">
+          <span class="mode-tab-code">[02]</span>
+          <span class="mode-tab-label">Свармы</span>
+          <span class="mode-tab-badge" id="badge-swarms">0</span>
+        </button>
+        <button class="mode-tab-btn" id="tab-btn-net" data-tab="net" onclick="switchModeTab('net')">
+          <span class="mode-tab-code">[03]</span>
+          <span class="mode-tab-label">Сеть</span>
+        </button>
+        <button class="mode-tab-btn" id="tab-btn-key" data-tab="key" onclick="switchModeTab('key')">
+          <span class="mode-tab-code">[04]</span>
+          <span class="mode-tab-label">Ключ</span>
+        </button>
+      </nav>
+
+      <!-- Persistent UDP Voice Bar (visible across all tabs when in voice) -->
+      <div class="voice-status-bar" id="voice-bar">
+        <div class="voice-conn-info">
+          <span class="voice-conn-title">● UDP VOICE RELAY АКТИВЕН</span>
+          <span class="voice-conn-sub" id="voice-sub">voice-lounge // 48kHz PCM</span>
+        </div>
+        <button class="btn danger mono" onclick="toggleVoiceConnect('voice-lounge')">ОТКЛ</button>
       </div>
 
-      <div id="channels-bar">
-        <div class="server-header">
-          <span id="server-title" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">Wex Realm</span>
-          <button class="drawer-close-btn" onclick="toggleMobileDrawer(false)" title="Закрыть меню">✕</button>
-        </div>
-
-        <div id="sidebar-scroll">
-          <!-- Text Channels -->
-          <div class="section-header">
-            <span class="section-title">Текстовые каналы</span>
-            <button class="section-add-btn" onclick="openInputModal('create_channel')" title="Создать канал">+</button>
-          </div>
-          <div class="sidebar-group" id="channel-container">
-            <div class="channel-item text-ch active">general</div>
-            <div class="channel-item text-ch">dev</div>
+      <!-- Master Panels -->
+      <div id="master-panels">
+        <!-- =================================================================
+             PANEL 1 (DEFAULT): ЛС / КОНТАКТЫ (1-on-1 E2EE Direct Messages)
+             ================================================================= -->
+        <section class="tab-panel active" id="panel-dms">
+          <div class="panel-action-row">
+            <button class="btn primary full mono" id="btn-add-contact" onclick="openConnectModal()">+ ДОБАВИТЬ КОНТАКТ / КЛЮЧ</button>
+            <button class="btn mono" id="btn-share-my-key" onclick="openInviteModal()" title="Мой инвайт и ключ">QR / КЛЮЧ</button>
           </div>
 
-          <!-- Voice Channels -->
-          <div class="section-header">
-            <span class="section-title">Голосовые каналы</span>
-          </div>
-          <div class="sidebar-group">
-            <div class="voice-channel" id="voice-btn" onclick="toggleVoiceConnect('voice-lounge')">
-              <span>🔊 voice-lounge</span>
-              <span id="voice-badge" style="font-size:11px; color:var(--text-muted)">Войти</span>
+          <!-- Active E2EE Direct Message Threads -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ЛИЧНЫЕ ДИАЛОГИ (X25519 + CHACHA20)</span>
+            </div>
+            <div class="item-list" id="dm-container">
+              <div class="empty-list-hint">
+                Нет активных диалогов. Выберите пира в локальной сети ниже или добавьте контакт по его Public Key / инвайт-ссылке.
+              </div>
             </div>
           </div>
 
-          <!-- Direct Messages -->
-          <div class="section-header">
-            <span class="section-title">Личные сообщения (E2EE 🔒)</span>
+          <!-- Discovered LAN & DHT Peers -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ОБНАРУЖЕННЫЕ УЗЛЫ (LAN / DHT)</span>
+              <button class="section-action-btn" onclick="triggerLanDiscovery()" title="Обновить поиск пиров">SCAN</button>
+            </div>
+            <div class="item-list" id="peer-container">
+              <div class="empty-list-hint">Радиомаяк LAN (UDP :9009) и таблица Kademlia DHT ожидают отклика узлов...</div>
+            </div>
           </div>
-          <div class="sidebar-group" id="dm-container">
-            <div style="font-size:12px; color:var(--text-muted); padding: 4px 10px;">Нажмите на пира для ЛС</div>
+        </section>
+
+        <!-- =================================================================
+             PANEL 2: СВАРМЫ (Decentralized Group Spaces & Channels)
+             ================================================================= -->
+        <section class="tab-panel" id="panel-swarms">
+          <!-- Swarm Selector Strip -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ВАШИ СВАРМЫ (СООБЩЕСТВА)</span>
+              <button class="section-action-btn" onclick="openInputModal('create_space')">+ НОВЫЙ</button>
+            </div>
+            <div class="swarm-switcher-strip" id="guilds-bar">
+              <button class="swarm-pill add-btn" onclick="openInputModal('create_space')">+</button>
+            </div>
           </div>
 
-          <!-- P2P Peers -->
-          <div class="section-header">
-            <span class="section-title">P2P Соседи в сети</span>
-            <button class="section-add-btn" onclick="openConnectModal()" title="Добавить пира">+</button>
+          <!-- Active Swarm Header & Invite Trigger -->
+          <div class="swarm-header-card">
+            <div>
+              <div class="swarm-active-title" id="server-title">Нет выбранной группы</div>
+              <div class="swarm-active-id" id="active-swarm-id-label">P2P MESH SWARM</div>
+            </div>
+            <button class="btn primary mono" onclick="openInviteModal()">ИНВАЙТ</button>
           </div>
-          <div class="sidebar-group" id="peer-container">
-            <div style="font-size:12px; color:var(--text-muted); padding: 4px 10px;">Поиск пиров (LAN / DHT)...</div>
-          </div>
-        </div>
 
-        <!-- Voice Active Bar -->
-        <div class="voice-status-bar" id="voice-bar">
-          <div class="voice-conn-info">
-            <div class="voice-conn-title">● Голос активен</div>
-            <div class="voice-conn-sub" id="voice-sub">voice-lounge / 48kHz UDP</div>
+          <!-- Swarm Text Channels -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">КАНАЛЫ СВАРМА</span>
+              <button class="section-action-btn" onclick="openInputModal('create_channel')">+ КАНАЛ</button>
+            </div>
+            <div class="item-list" id="channel-container">
+              <div class="empty-list-hint">Создайте группу (+) или подключитесь по инвайту</div>
+            </div>
           </div>
-          <button class="btn secondary" style="padding:5px 10px; font-size:11px;" onclick="toggleVoiceConnect('voice-lounge')">Выйти</button>
-        </div>
 
-        <!-- User Profile Footer -->
-        <div class="user-footer" onclick="openProfileModal()">
-          <div class="user-avatar" id="my-avatar">U</div>
-          <div class="user-info">
-            <div class="user-name" id="my-nickname">Подключение...</div>
-            <div class="user-status" id="my-node-status">Запуск демона...</div>
+          <!-- Swarm Voice Relay -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ГОЛОСОВОЙ КАНАЛ (UDP P2P)</span>
+            </div>
+            <div class="item-list">
+              <div class="voice-channel" id="voice-btn" onclick="toggleVoiceConnect('voice-lounge')">
+                <span class="mono" style="font-family:var(--font-mono); font-size:12px;">[AUDIO] voice-lounge</span>
+                <span class="crypto-tag" id="voice-badge">ВОЙТИ</span>
+              </div>
+            </div>
           </div>
-          <div class="settings-gear" title="Профиль и настройки">⚙️</div>
-        </div>
+        </section>
+
+        <!-- =================================================================
+             PANEL 3: СЕТЬ / УЗЕЛ (Live P2P Telemetry, STUN, DHT, Quas)
+             ================================================================= -->
+        <section class="tab-panel" id="panel-net">
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ТЕЛЕМЕТРИЯ ТРАНСПОРТА (WEX ENGINE)</span>
+            </div>
+            <div class="telemetry-grid">
+              <div class="telemetry-card">
+                <span class="telemetry-label">СТАТУС ДЕМОНА</span>
+                <span class="telemetry-value emerald" id="net-daemon-state">ONLINE</span>
+              </div>
+              <div class="telemetry-card">
+                <span class="telemetry-label">ЛОКАЛЬНЫЙ ПОРТ</span>
+                <span class="telemetry-value" id="net-udp-port">UDP :9001</span>
+              </div>
+              <div class="telemetry-card full">
+                <span class="telemetry-label">ВНЕШНИЙ WAN ENDPOINT (STUN / NAT)</span>
+                <span class="telemetry-value amber" id="net-wan-endpoint">Определение через STUN...</span>
+              </div>
+              <div class="telemetry-card">
+                <span class="telemetry-label">УЗЛОВ KADEMLIA DHT</span>
+                <span class="telemetry-value" id="net-dht-count">0</span>
+              </div>
+              <div class="telemetry-card">
+                <span class="telemetry-label">QUAS CACHED PACKETS</span>
+                <span class="telemetry-value" id="net-quas-count">ACTIVE</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-action-row">
+            <button class="btn primary full mono" id="btn-lan-beacon" onclick="triggerLanDiscovery()">LAN BEACON</button>
+            <button class="btn full mono" id="btn-stun-probe" onclick="triggerStunProbe()">STUN PROBE</button>
+          </div>
+
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ТАБЛИЦА МАРШРУТИЗАЦИИ ПИРОВ</span>
+              <button class="section-action-btn" onclick="openConnectModal()">+ УЗЕЛ</button>
+            </div>
+            <div class="code-box" id="profile-diag-box">Синхронизация с локальным демоном...</div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             PANEL 4: КЛЮЧ / ПРОФИЛЬ (Ed25519 Identity, QR, Master Seed)
+             ================================================================= -->
+        <section class="tab-panel" id="panel-key">
+          <!-- Nickname Setting -->
+          <div class="field-group">
+            <label class="field-label" for="profile-nick-input">ПУБЛИЧНЫЙ ПСЕВДОНИМ (БЕЗ KYC)</label>
+            <div class="panel-action-row">
+              <input type="text" class="text-input" id="profile-nick-input" placeholder="Ваш псевдоним">
+              <button class="btn primary mono" id="btn-save-nick" onclick="saveProfileNick()">СОХРАНИТЬ</button>
+            </div>
+          </div>
+
+          <!-- Ed25519 Public Key & QR -->
+          <div class="field-group">
+            <label class="field-label">ВАШ ED25519 PUBLIC KEY (ZERO-IP IDENTITY)</label>
+            <div class="code-box" id="key-pubkey-display">Генерация ключей Exort...</div>
+            <div class="panel-action-row">
+              <button class="btn primary full mono" id="btn-copy-pubkey" onclick="copyTextWithToast(myPublicKey, 'PUBLIC KEY СКОПИРОВАН')">КОПИРОВАТЬ PUBLIC KEY</button>
+              <button class="btn full mono" id="btn-share-uri" onclick="shareInviteNative()">ПОДЕЛИТЬСЯ URI</button>
+            </div>
+          </div>
+
+          <!-- QR Code Canvas -->
+          <div class="qr-container">
+            <canvas id="profile-qr-canvas" width="168" height="168"></canvas>
+            <span class="qr-caption">НАВЕДИТЕ КАМЕРУ ДЛЯ ПРЯМОГО СОЕДИНЕНИЯ (WEX://JOIN)</span>
+          </div>
+
+          <!-- Master Seed Backup / Restore -->
+          <div class="field-group">
+            <div class="section-header">
+              <span class="field-label">ПРИВАТНЫЙ MASTER SEED (HEX 64)</span>
+              <button class="section-action-btn" id="btn-toggle-seed" onclick="toggleSeedReveal()">ПОКАЗАТЬ / СКРЫТЬ</button>
+            </div>
+            <div class="code-box masked" id="seed-hex-box" onclick="toggleSeedReveal()" title="Нажмите, чтобы показать или скрыть">
+              0000000000000000000000000000000000000000000000000000000000000000
+            </div>
+            <div class="panel-action-row">
+              <button class="btn full mono" id="btn-copy-seed" onclick="copyMasterSeed()">ЭКСПОРТ SEED</button>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label" for="seed-import-input">ИМПОРТ / ВОССТАНОВЛЕНИЕ КЛЮЧА (HEX SEED)</label>
+            <div class="panel-action-row">
+              <input type="text" class="text-input mono" id="seed-import-input" placeholder="64-символьный hex-ключ...">
+              <button class="btn amber mono" id="btn-import-seed" onclick="submitImportSeed()">ИМПОРТ</button>
+            </div>
+          </div>
+        </section>
       </div>
     </aside>
 
-    <!-- Main Chat Area -->
-    <main id="chat-area">
-      <header class="chat-header">
-        <button class="menu-toggle" onclick="toggleMobileDrawer()" title="Открыть меню">☰</button>
-        <div class="chat-title-wrap">
-          <span style="color:var(--text-muted); font-weight:700;" id="channel-prefix">#</span>
-          <span id="active-channel-name">general</span>
-          <span id="active-channel-topic">| Sovereign P2P Swarm</span>
+    <!-- =====================================================================
+         RIGHT / DETAIL PANE: Active Conversation Stream
+         ===================================================================== -->
+    <main id="detail-pane">
+      <header class="chat-header" id="chat-header">
+        <div class="chat-header-left">
+          <button id="btn-back-to-list" onclick="closeMobileConversation()" title="Назад к списку">
+            ← Назад
+          </button>
+          <div class="chat-title-stack">
+            <div class="chat-title-row">
+              <span id="channel-prefix">E2EE</span>
+              <span id="active-channel-name">Личные сообщения</span>
+            </div>
+            <span id="active-channel-topic">X25519 + ChaCha20-Poly1305</span>
+          </div>
         </div>
-        <div class="header-btns">
-          <button class="btn secondary" onclick="openConnectModal()">+ Пир</button>
-          <button class="btn" onclick="openInviteModal()">Инвайт</button>
+        <div class="chat-header-actions">
+          <button class="btn mono" onclick="openConnectModal()">+ КОНТАКТ</button>
+          <button class="btn primary mono" onclick="openInviteModal()">ИНВАЙТ</button>
         </div>
       </header>
 
       <div class="messages-feed" id="messages">
         <div class="empty-state">
-          <h3>Добро пожаловать в #general</h3>
-          <p>Сообщения подписываются ключом Ed25519 и доставляются напрямую через P2P/DHT без центральных серверов.</p>
+          <span class="empty-state-tag">WEX // SOVEREIGN E2EE</span>
+          <h3>Личные сообщения</h3>
+          <p>Выберите контакт слева или добавьте собеседника по Public Key / инвайт-ссылке для начала прямого зашифрованного диалога.</p>
         </div>
       </div>
 
       <div class="input-box">
         <div class="input-wrapper">
           <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(event)">
-          <button class="attach-btn" title="Прикрепить файл (P2P Blob)" onclick="document.getElementById('file-input').click()">📎</button>
-          <input type="text" id="msg-input" placeholder="Написать в #general..." autocomplete="off">
-          <button class="send-btn" onclick="submitCurrentMessage()" title="Отправить">➤</button>
+          <button class="attach-btn" id="btn-attach-file" title="Прикрепить файл (P2P Chunked Blob)" onclick="document.getElementById('file-input').click()">+</button>
+          <input type="text" id="msg-input" placeholder="Зашифрованное сообщение..." autocomplete="off">
+          <button class="send-btn" id="btn-send-msg" onclick="submitCurrentMessage()" title="Отправить пакет">ОТПР</button>
         </div>
       </div>
     </main>
   </div>
 
-  <!-- MODAL 1: Invite / Share -->
+  <!-- =======================================================================
+       MODAL 1: INVITE / SHARE CRYPTOGRAPHIC URI
+       ======================================================================= -->
   <div class="modal-overlay" id="modal-invite" onclick="if(event.target===this)closeModals()">
     <div class="modal-card">
       <div class="modal-header">
-        <span class="modal-title">Пригласить друга в сообщество</span>
+        <span class="modal-title">КРИПТО-ИНВАЙТ // ПРЯМОЕ СОЕДИНЕНИЕ</span>
         <button class="modal-close" onclick="closeModals()">✕</button>
       </div>
-      <div>
-        <label class="field-label">Инвайт-ссылка в 1 клик (Space + E2EE ключ + Адрес)</label>
+      <div class="field-group">
+        <label class="field-label">URI ССЫЛКА (PUBLIC KEY + ENDPOINT + SWARM)</label>
         <div class="code-box" id="invite-link-box">wex://join/...</div>
       </div>
       <div class="modal-actions">
-        <button class="btn" onclick="copyTextWithToast(document.getElementById('invite-link-box').innerText, 'Инвайт-ссылка скопирована!')">📋 Скопировать</button>
-        <button class="btn green" onclick="shareInviteNative()">📤 Поделиться</button>
+        <button class="btn primary mono" onclick="copyTextWithToast(document.getElementById('invite-link-box').innerText, 'ИНВАЙТ-ССЫЛКА СКОПИРОВАНА')">КОПИРОВАТЬ URI</button>
+        <button class="btn mono" onclick="shareInviteNative()">ПОДЕЛИТЬСЯ</button>
       </div>
-      <div>
-        <label class="field-label">Ваш персональный Ed25519 Public Key (Zero-IP поиск в DHT)</label>
+      <div class="field-group">
+        <label class="field-label">ВАШ ED25519 PUBLIC KEY (64 HEX)</label>
         <div class="code-box" id="invite-pk-box">...</div>
       </div>
       <div class="modal-actions">
-        <button class="btn secondary" onclick="copyTextWithToast(myPublicKey, 'Public Key скопирован!')">📋 Скопировать Public Key</button>
+        <button class="btn mono" onclick="copyTextWithToast(myPublicKey, 'PUBLIC KEY СКОПИРОВАН')">КОПИРОВАТЬ PUBLIC KEY</button>
       </div>
     </div>
   </div>
 
-  <!-- MODAL 2: Connect Peer / Join Invite -->
+  <!-- =======================================================================
+       MODAL 2: ADD CONTACT / CONNECT PEER BY PUBLIC KEY, INVITE OR IP
+       ======================================================================= -->
   <div class="modal-overlay" id="modal-connect" onclick="if(event.target===this)closeModals()">
     <div class="modal-card">
       <div class="modal-header">
-        <span class="modal-title">Подключить пира / Вступить</span>
+        <span class="modal-title">ДОБАВИТЬ КОНТАКТ // УЗЕЛ</span>
         <button class="modal-close" onclick="closeModals()">✕</button>
       </div>
-      <div>
-        <label class="field-label">Инвайт (wex://join/...), Public Key друга (64 симв.) или IP:Port</label>
-        <input type="text" class="modal-input" id="connect-target-input" placeholder="wex://join/... или 64-значный Public Key">
+      <div class="field-group">
+        <label class="field-label" for="connect-target-input">PUBLIC KEY (64 HEX), ССЫЛКА WEX://JOIN ИЛИ IP:PORT</label>
+        <input type="text" class="text-input mono" id="connect-target-input" placeholder="wex://join/... или 64-значный Public Key">
       </div>
       <div class="modal-actions">
-        <button class="btn secondary" onclick="pasteIntoInput('connect-target-input')">📋 Вставить из буфера</button>
-        <button class="btn" onclick="submitConnectPeer()">Подключиться</button>
+        <button class="btn mono" onclick="pasteIntoInput('connect-target-input')">ВСТАВИТЬ</button>
+        <button class="btn primary mono" onclick="submitConnectPeer()">ПОДКЛЮЧИТЬ</button>
       </div>
     </div>
   </div>
 
-  <!-- MODAL 3: Profile & Node Diagnostics -->
-  <div class="modal-overlay" id="modal-profile" onclick="if(event.target===this)closeModals()">
-    <div class="modal-card">
-      <div class="modal-header">
-        <span class="modal-title">Профиль и P2P Узел</span>
-        <button class="modal-close" onclick="closeModals()">✕</button>
-      </div>
-      <div>
-        <label class="field-label">Ваш никнейм</label>
-        <input type="text" class="modal-input" id="profile-nick-input" placeholder="Введите никнейм">
-      </div>
-      <div class="modal-actions">
-        <button class="btn" onclick="saveProfileNick()">Сохранить никнейм</button>
-      </div>
-      <div>
-        <label class="field-label">Статус криптографического узла</label>
-        <div class="code-box" id="profile-diag-box">Загрузка...</div>
-      </div>
-      <div class="modal-actions">
-        <button class="btn secondary" onclick="copyTextWithToast(myPublicKey, 'Public ID скопирован!')">📋 Копировать мой ID</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL 4: Universal Input (Create Space / Create Channel / Edit Message) -->
+  <!-- =======================================================================
+       MODAL 3: UNIVERSAL INPUT (CREATE SWARM / CREATE CHANNEL / EDIT PACKET)
+       ======================================================================= -->
   <div class="modal-overlay" id="modal-input" onclick="if(event.target===this)closeModals()">
     <div class="modal-card">
       <div class="modal-header">
-        <span class="modal-title" id="modal-input-title">Создать</span>
+        <span class="modal-title" id="modal-input-title">СОЗДАТЬ</span>
         <button class="modal-close" onclick="closeModals()">✕</button>
       </div>
-      <div>
-        <label class="field-label" id="modal-input-label">Название</label>
-        <input type="text" class="modal-input" id="modal-input-field">
+      <div class="field-group">
+        <label class="field-label" id="modal-input-label" for="modal-input-field"> ПАРАМЕТР</label>
+        <input type="text" class="text-input" id="modal-input-field">
       </div>
       <div class="modal-actions">
-        <button class="btn secondary" onclick="closeModals()">Отмена</button>
-        <button class="btn" onclick="submitInputModal()">Подтвердить</button>
+        <button class="btn mono" onclick="closeModals()">ОТМЕНА</button>
+        <button class="btn primary mono" onclick="submitInputModal()">ПОДТВЕРДИТЬ</button>
       </div>
     </div>
   </div>
 
   <script>
-    let ws;
-    let currentSpaceId = '';
-    let currentChannel = 'general';
-    let currentDmPeerPk = null;
-    let myNick = 'User';
-    let myUdpPort = 9001;
-    let myPublicKey = '';
-    let myInviteUri = '';
-    let myWanEndpoint = '';
-    let myDhtCount = 0;
-    let spacesCache = [];
-    let peersCache = [];
-    let openDms = new Set();
-    let blobCache = {};
-    let voiceConnected = false;
-    let pendingModalAction = null;
-    let pendingTargetSig = null;
+/**
+ * WEX // PROTOCOL — Frontend Controller & E2EE DM State Machine
+ * File: web/wex_app.js
+ * Zero external dependencies. Designed for Desktop, Tablet Split-View, and Mobile Master-Detail.
+ */
 
-    /* Adapt height to mobile virtual keyboard */
+(function () {
+  'use strict';
+
+  const CONTACTS_STORAGE_KEY = 'wex_contacts_v2';
+
+  /* ======================== APPLICATION STATE ======================== */
+  let ws = null;
+  let reconnectTimer = null;
+
+  let activeTab = 'dms'; // 'dms' | 'swarms' | 'net' | 'key'
+  let activeChatMode = 'dm'; // 'dm' | 'swarm'
+  let currentSpaceId = '';
+  let currentChannel = '';
+  let currentDmPeerPk = null;
+
+  /* Local Node Identity & Telemetry */
+  let myNick = 'User';
+  let myStatus = 'Online';
+  let myUdpPort = 9001;
+  let myPublicKey = '';
+  let myX25519Key = '';
+  let myInviteUri = '';
+  let myWanEndpoint = '';
+  let myDhtCount = 0;
+  let myOfflineShards = 0;
+  let myExportedSeed = '';
+  window.myPublicKey = '';
+
+  /* Collections */
+  let contacts = {}; // keyed by 64-char public_key: { public_key, nickname, ip, port, online, use_relay, last_msg, last_ts, unread }
+  let spacesCache = [];
+  let peersCache = [];
+  let dhtNodesCache = [];
+  let historyCache = [];
+  let blobCache = {};
+
+  /* Voice & Audio State */
+  let voiceConnected = false;
+  let voiceChannelName = 'voice-lounge';
+  let audioCtx = null;
+  let micStream = null;
+
+  /* Modal State */
+  let pendingModalAction = null;
+  let pendingTargetSig = null;
+
+  /* ======================== DOM HELPERS ======================== */
+  function getEl(...ids) {
+    for (let i = 0; i < ids.length; i++) {
+      if (!ids[i]) continue;
+      const el = document.getElementById(ids[i]);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  function setText(elOrIds, text) {
+    const ids = Array.isArray(elOrIds) ? elOrIds : [elOrIds];
+    ids.forEach((idOrEl) => {
+      const el = typeof idOrEl === 'string' ? document.getElementById(idOrEl) : idOrEl;
+      if (el) el.textContent = text;
+    });
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+  }
+
+  function shortKey(pk) {
+    if (!pk || pk.length < 16) return pk || 'unknown';
+    return pk.substring(0, 8) + '…' + pk.substring(pk.length - 6);
+  }
+
+  function formatTimestamp(tsMs) {
+    if (!tsMs) {
+      const now = new Date();
+      return now.toTimeString().substring(0, 5);
+    }
+    const d = new Date(Number(tsMs));
+    if (isNaN(d.getTime())) return 'сейчас';
+    return d.toTimeString().substring(0, 5);
+  }
+
+  function dmChannelForPk(pk) {
+    if (!pk) return '';
+    return 'dm:' + pk.toLowerCase().substring(0, 58);
+  }
+
+  function isValidHex64(str) {
+    return typeof str === 'string' && /^[0-9a-fA-F]{64}$/.test(str.trim());
+  }
+
+  /* ======================== PERSISTENT CONTACT BOOK (wex_contacts_v2) ======================== */
+  function loadContacts() {
+    try {
+      const raw = localStorage.getItem(CONTACTS_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          contacts = parsed;
+          Object.keys(contacts).forEach((pk) => {
+            contacts[pk].online = false;
+          });
+        }
+      }
+    } catch (e) {
+      contacts = {};
+    }
+  }
+
+  function saveContacts() {
+    try {
+      localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts));
+    } catch (e) {}
+  }
+
+  function findContactKeyByPrefix(prefix58) {
+    if (!prefix58) return null;
+    const clean = prefix58.toLowerCase();
+    const keys = Object.keys(contacts);
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i].toLowerCase().startsWith(clean)) {
+        return keys[i];
+      }
+    }
+    return null;
+  }
+
+  function upsertContact(pk, patch) {
+    if (!pk || typeof pk !== 'string') return null;
+    const normPk = pk.trim().toLowerCase();
+    if (normPk.length < 58) return null;
+    if (myPublicKey && normPk === myPublicKey.toLowerCase()) return null;
+
+    let key = normPk;
+    if (normPk.length < 64) {
+      const existingFull = findContactKeyByPrefix(normPk);
+      if (existingFull) key = existingFull;
+    } else {
+      const prefix58 = normPk.substring(0, 58);
+      if (contacts[prefix58] && prefix58 !== normPk) {
+        contacts[normPk] = Object.assign({}, contacts[prefix58], { public_key: normPk });
+        delete contacts[prefix58];
+      }
+    }
+
+    const existing = contacts[key] || {
+      public_key: key,
+      nickname: 'Peer-' + key.substring(0, 6),
+      ip: '',
+      port: 0,
+      online: false,
+      use_relay: false,
+      last_msg: '',
+      last_ts: 0,
+      unread: 0
+    };
+
+    const updated = Object.assign({}, existing, patch || {}, { public_key: key });
+    if (!updated.nickname || updated.nickname === 'Anon' || updated.nickname.startsWith('Peer-')) {
+      if (patch && patch.nickname && patch.nickname !== 'Anon') {
+        updated.nickname = patch.nickname;
+      } else if (!existing.nickname) {
+        updated.nickname = 'Peer-' + key.substring(0, 6);
+      }
+    }
+    contacts[key] = updated;
+    return updated;
+  }
+
+  function mergePeersAndHistoryIntoContacts(peersList, historyList) {
+    Object.keys(contacts).forEach((k) => {
+      contacts[k].online = false;
+    });
+
+    if (Array.isArray(peersList)) {
+      peersList.forEach((p) => {
+        if (!p || !p.public_key) return;
+        upsertContact(p.public_key, {
+          nickname: p.nickname || ('Peer-' + p.public_key.substring(0, 6)),
+          ip: p.ip || '',
+          port: p.port || 0,
+          online: true,
+          use_relay: Boolean(p.use_relay)
+        });
+      });
+    }
+
+    if (Array.isArray(historyList)) {
+      historyList.forEach((m) => {
+        if (!m) return;
+        const isDm = typeof m.channel === 'string' && m.channel.startsWith('dm:');
+        const senderPk = m.author_pk && isValidHex64(m.author_pk) ? m.author_pk.toLowerCase() : null;
+        const peerPk = m.peer_pk && isValidHex64(m.peer_pk) ? m.peer_pk.toLowerCase() : null;
+
+        if (isDm) {
+          const dmPrefix = m.channel.substring(3).toLowerCase();
+          let targetPk = null;
+
+          if (senderPk && (!myPublicKey || senderPk !== myPublicKey.toLowerCase())) {
+            targetPk = senderPk;
+          } else if (peerPk && (!myPublicKey || peerPk !== myPublicKey.toLowerCase())) {
+            targetPk = peerPk;
+          } else {
+            targetPk = findContactKeyByPrefix(dmPrefix) || dmPrefix;
+          }
+
+          if (targetPk && (!myPublicKey || !myPublicKey.toLowerCase().startsWith(targetPk))) {
+            const isFromOther = m.author && m.author !== myNick;
+            const patch = {
+              last_msg: m.content || '',
+              last_ts: m.timestamp_ms || Date.now()
+            };
+            if (isFromOther && m.author) {
+              patch.nickname = m.author;
+            }
+            upsertContact(targetPk, patch);
+          }
+        } else if (senderPk && (!myPublicKey || senderPk !== myPublicKey.toLowerCase())) {
+          upsertContact(senderPk, {
+            nickname: m.author || ('Peer-' + senderPk.substring(0, 6))
+          });
+        }
+      });
+    }
+
+    saveContacts();
+  }
+
+  /* ======================== PARSE URI / PUBLIC KEY / TARGET ======================== */
+  function parseTargetInput(rawInput) {
+    const trimmed = (rawInput || '').trim();
+    if (!trimmed) return { raw: '', pk: null, ipPort: null };
+
+    if (isValidHex64(trimmed)) {
+      return { raw: trimmed, pk: trimmed.toLowerCase(), ipPort: null };
+    }
+
+    const atIdx = trimmed.indexOf('@');
+    if (atIdx === 64 && isValidHex64(trimmed.substring(0, 64))) {
+      return {
+        raw: trimmed,
+        pk: trimmed.substring(0, 64).toLowerCase(),
+        ipPort: trimmed.substring(65)
+      };
+    }
+
+    const pkMatch = trimmed.match(/[?&]pk=([0-9a-fA-F]{64})/);
+    const peerMatch = trimmed.match(/[?&]peer=([^&#\s]+)/);
+    if (pkMatch) {
+      return {
+        raw: trimmed,
+        pk: pkMatch[1].toLowerCase(),
+        ipPort: peerMatch ? peerMatch[1] : null
+      };
+    }
+
+    return { raw: trimmed, pk: null, ipPort: trimmed };
+  }
+
+  /* ======================== MASTER-DETAIL & TAB NAVIGATION ======================== */
+  function normalizeTabName(tabName) {
+    if (tabName === 'network' || tabName === 'net') return 'net';
+    if (tabName === 'identity' || tabName === 'key') return 'key';
+    if (tabName === 'swarms' || tabName === 'spaces') return 'swarms';
+    return 'dms';
+  }
+
+  function selectTab(tabName) {
+    activeTab = normalizeTabName(tabName);
+    document.body.dataset.tab = activeTab;
+
+    const btnMap = {
+      dms: ['tab-btn-dms'],
+      swarms: ['tab-btn-swarms'],
+      net: ['tab-btn-net', 'tab-btn-network'],
+      key: ['tab-btn-key', 'tab-btn-identity']
+    };
+
+    document.querySelectorAll('.mode-tab-btn, [data-tab], .tab-btn').forEach((btn) => {
+      const attr = normalizeTabName(btn.getAttribute('data-tab') || '');
+      const isMatch = attr === activeTab || (btnMap[activeTab] && btnMap[activeTab].includes(btn.id));
+      btn.classList.toggle('active', isMatch);
+    });
+
+    const panelGroups = {
+      dms: ['panel-dms', 'tab-dms', 'view-dms'],
+      swarms: ['panel-swarms', 'tab-swarms', 'view-swarms'],
+      net: ['panel-net', 'panel-network', 'tab-network', 'view-network'],
+      key: ['panel-key', 'panel-identity', 'tab-identity', 'view-identity']
+    };
+
+    Object.keys(panelGroups).forEach((key) => {
+      panelGroups[key].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.classList.toggle('active', key === activeTab);
+        }
+      });
+    });
+
+    if (activeTab === 'key') {
+      if (myPublicKey) renderAllKeyCanvases(myPublicKey);
+      if (!myExportedSeed && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'export_secret' }));
+      }
+    }
+  }
+
+  function switchModeTab(tabName) {
+    selectTab(tabName);
+  }
+
+  function openDmConversation(pk) {
+    if (!pk) return;
+    const normPk = pk.trim().toLowerCase();
+    const resolvedKey = normPk.length < 64 ? (findContactKeyByPrefix(normPk) || normPk) : normPk;
+    const contact = upsertContact(resolvedKey, { unread: 0 });
+    saveContacts();
+
+    activeChatMode = 'dm';
+    currentDmPeerPk = contact ? contact.public_key : resolvedKey;
+    currentChannel = dmChannelForPk(currentDmPeerPk);
+
+    document.body.classList.add('chat-active');
+    document.body.classList.remove('drawer-open');
+
+    updateChatHeader();
+    renderContactList();
+    renderChannelsList();
+    renderHistory(historyCache);
+
+    const inputEl = getEl('msg-input', 'chat-input');
+    if (inputEl && window.innerWidth >= 768) {
+      inputEl.focus();
+    }
+  }
+
+  function openSwarmChannel(spaceId, channelName) {
+    if (spaceId && spaceId !== currentSpaceId) {
+      currentSpaceId = spaceId;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'switch_space', space_id: spaceId }));
+      }
+    }
+    const ch = channelName || 'general';
+    activeChatMode = 'swarm';
+    currentDmPeerPk = null;
+    currentChannel = ch;
+
+    document.body.classList.add('chat-active');
+    document.body.classList.remove('drawer-open');
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'switch_channel', name: ch }));
+    }
+
+    updateChatHeader();
+    renderContactList();
+    renderSpacesList();
+    renderChannelsList();
+    renderHistory(historyCache);
+  }
+
+  function closeActiveChat() {
+    document.body.classList.remove('chat-active');
+    document.body.classList.remove('drawer-open');
+  }
+
+  function closeMobileConversation() {
+    closeActiveChat();
+  }
+
+  function updateChatHeader() {
+    const prefixEl = getEl('channel-prefix', 'chat-header-prefix');
+    const titleEl = getEl('active-channel-name', 'chat-header-title');
+    const topicEl = getEl('active-channel-topic', 'chat-header-subtitle');
+    const inputEl = getEl('msg-input', 'chat-input');
+
+    if (activeChatMode === 'dm' && currentDmPeerPk) {
+      const c = contacts[currentDmPeerPk] || {
+        nickname: 'Peer-' + currentDmPeerPk.substring(0, 6),
+        public_key: currentDmPeerPk,
+        online: false,
+        use_relay: false
+      };
+
+      if (prefixEl) prefixEl.textContent = 'E2EE // ЛС';
+      if (titleEl) titleEl.textContent = c.nickname || shortKey(currentDmPeerPk);
+
+      let routeLabel = `PK: ${shortKey(currentDmPeerPk)} // ОФЛАЙН-ОЧЕРЕДЬ QUAS (X25519)`;
+      if (c.online) {
+        routeLabel = c.use_relay
+          ? `ОНЛАЙН // DHT OVERLAY RELAY (${shortKey(currentDmPeerPk)})`
+          : `ОНЛАЙН // ПРЯМОЙ UDP P2P (${c.ip ? c.ip + ':' + c.port : shortKey(currentDmPeerPk)})`;
+      }
+      if (topicEl) topicEl.textContent = routeLabel;
+      if (inputEl) inputEl.placeholder = `Зашифрованное ЛС для ${c.nickname || shortKey(currentDmPeerPk)} (ChaCha20-Poly1305)...`;
+    } else {
+      const sp = spacesCache.find((s) => s.id === currentSpaceId);
+      const spName = sp ? sp.name : 'Нет выбранной группы';
+      if (prefixEl) prefixEl.textContent = 'SWARM #';
+      if (titleEl) titleEl.textContent = currentChannel;
+      if (topicEl) topicEl.textContent = `${spName} // ED25519 SIGNED MESH`;
+      if (inputEl) inputEl.placeholder = `Сообщение в #${currentChannel}...`;
+    }
+  }
+
+  /* ======================== PURE-CANVAS 21x21 KEY MATRIX / QR RENDERER ======================== */
+  function drawFinderPattern(ctx, ox, oy, cellSize, fgColor, bgColor) {
+    for (let r = 0; r < 7; r++) {
+      for (let c = 0; c < 7; c++) {
+        const isBorder = r === 0 || r === 6 || c === 0 || c === 6;
+        const isInner = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+        ctx.fillStyle = (isBorder || isInner) ? fgColor : bgColor;
+        ctx.fillRect((ox + c) * cellSize, (oy + r) * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+
+  function renderKeyMatrixCanvas(canvasOrId, hexKey) {
+    const canvas = typeof canvasOrId === 'string' ? document.getElementById(canvasOrId) : canvasOrId;
+    if (!canvas || !canvas.getContext) return;
+
+    const cleanHex = (hexKey || '').replace(/[^0-9a-fA-F]/g, '').padEnd(64, '0');
+    const bytes = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) {
+      bytes[i] = parseInt(cleanHex.substr(i * 2, 2), 16) || 0;
+    }
+
+    const gridSize = 21;
+    const size = canvas.width || 168;
+    const padding = 8;
+    const innerSize = size - padding * 2;
+    const cellSize = Math.floor(innerSize / gridSize);
+    const offset = Math.floor((size - cellSize * gridSize) / 2);
+
+    const ctx = canvas.getContext('2d');
+    const bgColor = '#0a0b0d';
+    const fgPrimary = '#eceef2';
+    const fgAccent = '#10b981';
+
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(offset, offset);
+
+    drawFinderPattern(ctx, 0, 0, cellSize, fgAccent, bgColor);
+    drawFinderPattern(ctx, gridSize - 7, 0, cellSize, fgAccent, bgColor);
+    drawFinderPattern(ctx, 0, gridSize - 7, cellSize, fgAccent, bgColor);
+
+    for (let i = 8; i < gridSize - 8; i++) {
+      ctx.fillStyle = (i % 2 === 0) ? fgPrimary : bgColor;
+      ctx.fillRect(i * cellSize, 6 * cellSize, cellSize, cellSize);
+      ctx.fillRect(6 * cellSize, i * cellSize, cellSize, cellSize);
+    }
+
+    let bitIdx = 0;
+    for (let r = 0; r < gridSize; r++) {
+      for (let c = 0; c < gridSize; c++) {
+        const inTL = r < 8 && c < 8;
+        const inTR = r < 8 && c >= gridSize - 8;
+        const inBL = r >= gridSize - 8 && c < 8;
+        const isTiming = r === 6 || c === 6;
+        if (inTL || inTR || inBL || isTiming) continue;
+
+        const byteA = bytes[bitIdx % 32];
+        const byteB = bytes[(bitIdx * 7 + r * 3 + c * 5) % 32];
+        const shift = (bitIdx + r + c) % 8;
+        const bit = ((byteA ^ byteB) >> shift) & 1;
+
+        if (bit === 1) {
+          ctx.fillStyle = ((r + c) % 5 === 0) ? fgAccent : fgPrimary;
+          ctx.fillRect(c * cellSize, r * cellSize, cellSize - 0.5, cellSize - 0.5);
+        }
+        bitIdx++;
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function renderAllKeyCanvases(hexKey) {
+    const ids = ['profile-qr-canvas', 'identity-qr-canvas', 'qr-canvas', 'key-matrix-canvas'];
+    ids.forEach((id) => {
+      const c = document.getElementById(id);
+      if (c) renderKeyMatrixCanvas(c, hexKey);
+    });
+  }
+
+  /* ======================== HARDWARE-STYLE WEB AUDIO SYNTHESIZER ======================== */
+  function playIncomingDmTick() {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return;
+      if (!audioCtx) {
+        audioCtx = new AudioContextClass();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(() => {});
+      }
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1046.5, now);
+      osc.frequency.exponentialRampToValueAtTime(1567.98, now + 0.045);
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.08, now + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.085);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.09);
+    } catch (e) {}
+  }
+
+  /* ======================== NATIVE ANDROID BRIDGE & CLIPBOARD ======================== */
+  function showToast(msg) {
+    const t = getEl('toast', 'app-toast');
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._hideTimer);
+    t._hideTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  function copyTextWithToast(text, toastMsg) {
+    if (!text) return;
+    if (window.AndroidBridge && typeof window.AndroidBridge.copyText === 'function') {
+      window.AndroidBridge.copyText(String(text));
+      showToast(toastMsg || 'СКОПИРОВАНО В БУФЕР');
+      return;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(String(text)).then(() => {
+        showToast(toastMsg || 'СКОПИРОВАНО В БУФЕР');
+      }).catch(() => fallbackCopy(String(text), toastMsg));
+    } else {
+      fallbackCopy(String(text), toastMsg);
+    }
+  }
+
+  function fallbackCopy(text, toastMsg) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+      showToast(toastMsg || 'СКОПИРОВАНО В БУФЕР');
+    } catch (e) {}
+    document.body.removeChild(ta);
+  }
+
+  async function pasteIntoInput(inputId) {
+    const el = typeof inputId === 'string' ? document.getElementById(inputId) : inputId;
+    if (!el) return;
+    if (window.AndroidBridge && typeof window.AndroidBridge.pasteText === 'function') {
+      const clip = window.AndroidBridge.pasteText();
+      if (clip) {
+        el.value = String(clip).trim();
+        showToast('ВСТАВЛЕНО ИЗ БУФЕРА');
+        return;
+      }
+    }
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      try {
+        const clip = await navigator.clipboard.readText();
+        if (clip) {
+          el.value = clip.trim();
+          showToast('ВСТАВЛЕНО ИЗ БУФЕРА');
+          return;
+        }
+      } catch (e) {}
+    }
+    el.focus();
+  }
+
+  function shareInviteNative(customText) {
+    const link = customText || myInviteUri || (myPublicKey ? `wex://join/${currentSpaceId || 'dm'}?peer=${myWanEndpoint || ('127.0.0.1:' + myUdpPort)}&pk=${myPublicKey}` : '');
+    if (!link) return;
+    if (window.AndroidBridge && typeof window.AndroidBridge.shareText === 'function') {
+      window.AndroidBridge.shareText(link);
+    } else if (navigator.share) {
+      navigator.share({ title: 'WEX // Ключ и инвайт', text: link }).catch(() => {});
+    } else {
+      copyTextWithToast(link, 'URI СКОПИРОВАН В БУФЕР');
+    }
+  }
+
+  /* ======================== RENDER FUNCTIONS ======================== */
+  function renderContactList() {
+    const container = getEl('dm-container', 'dm-list', 'contacts-list');
+    if (!container) return;
+
+    const list = Object.values(contacts);
+
+    // Update badge count
+    const totalUnread = list.reduce((acc, c) => acc + (c.unread || 0), 0);
+    setText(['badge-dms'], String(totalUnread > 0 ? totalUnread : list.length));
+
+    list.sort((a, b) => {
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      if ((b.last_ts || 0) !== (a.last_ts || 0)) return (b.last_ts || 0) - (a.last_ts || 0);
+      return (a.nickname || '').localeCompare(b.nickname || '');
+    });
+
+    container.innerHTML = '';
+
+    if (list.length === 0) {
+      container.innerHTML = `
+        <div class="empty-list-hint">
+          Нет активных диалогов. Нажмите «+ ДОБАВИТЬ КОНТАКТ / КЛЮЧ» выше и вставьте 64-значный Ed25519 ключ собеседника или инвайт wex:// для прямого E2EE ЛС.
+        </div>
+      `;
+      return;
+    }
+
+    list.forEach((c) => {
+      const dmCh = dmChannelForPk(c.public_key);
+      const isActive = activeChatMode === 'dm' && (currentDmPeerPk === c.public_key || currentChannel === dmCh);
+      const item = document.createElement('div');
+      item.className = 'peer-item channel-item' + (isActive ? ' active' : '');
+      item.setAttribute('data-pk', c.public_key);
+
+      const dotClass = c.online ? (c.use_relay ? 'amber' : 'online') : 'offline';
+      const transportTag = c.online ? (c.use_relay ? 'RELAY' : 'DIRECT') : 'QUAS';
+      const preview = c.last_msg
+        ? (c.last_msg.length > 34 ? c.last_msg.substring(0, 34) + '…' : c.last_msg)
+        : shortKey(c.public_key);
+
+      item.innerHTML = `
+        <div class="peer-left">
+          <span class="peer-dot ${dotClass}" style="background:${c.online ? (c.use_relay ? '#f59e0b' : '#10b981') : '#4a5160'};"></span>
+          <div class="peer-meta">
+            <span class="peer-name">${escapeHtml(c.nickname)}</span>
+            <span class="peer-sub">${escapeHtml(preview)}</span>
+          </div>
+        </div>
+        <div class="item-right">
+          ${c.unread > 0
+            ? `<span class="crypto-tag" style="background:#10b981; color:#0a0b0d; font-weight:700;">+${c.unread}</span>`
+            : `<span class="crypto-tag">${transportTag}</span>`
+          }
+        </div>
+      `;
+
+      item.onclick = () => openDmConversation(c.public_key);
+      container.appendChild(item);
+    });
+  }
+
+  function renderPeersList() {
+    const container = getEl('peer-container', 'lan-peers-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (!peersCache || peersCache.length === 0) {
+      container.innerHTML = '<div class="empty-list-hint">Радиомаяк LAN (UDP :9009) и таблица Kademlia DHT ожидают отклика узлов...</div>';
+      return;
+    }
+
+    peersCache.forEach((p) => {
+      const item = document.createElement('div');
+      item.className = 'peer-item';
+      item.innerHTML = `
+        <div class="peer-left">
+          <span class="peer-dot online" style="background:#10b981;"></span>
+          <div class="peer-meta">
+            <span class="peer-name">${escapeHtml(p.nickname || 'Node')}</span>
+            <span class="peer-sub">${escapeHtml(p.ip || '')}:${p.port || ''} // ${shortKey(p.public_key)}</span>
+          </div>
+        </div>
+        <span class="crypto-tag">E2EE ЛС →</span>
+      `;
+      item.onclick = () => {
+        if (p.public_key) {
+          openDmConversation(p.public_key);
+        }
+      };
+      container.appendChild(item);
+    });
+  }
+
+  function renderSpacesList() {
+    const container = getEl('guilds-bar', 'spaces-list');
+    setText(['badge-swarms'], String(spacesCache.length));
+    if (!container) return;
+    container.innerHTML = '';
+
+    spacesCache.forEach((sp) => {
+      const active = sp.id === currentSpaceId;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'swarm-pill guild-icon' + (active ? ' active' : '');
+      btn.textContent = sp.name || 'Swarm';
+      btn.title = `${sp.name} (${shortKey(sp.id)})`;
+      btn.onclick = () => switchSpace(sp.id);
+      container.appendChild(btn);
+    });
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'swarm-pill add-btn guild-icon';
+    addBtn.textContent = '+ Создать';
+    addBtn.onclick = () => openInputModal('create_space');
+    container.appendChild(addBtn);
+  }
+
+  function renderChannelsList() {
+    const container = getEl('channel-container', 'swarm-channels-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const activeSp = spacesCache.find((s) => s.id === currentSpaceId) || spacesCache[0];
+    setText(['server-title'], activeSp ? activeSp.name : 'Нет выбранной группы');
+    setText(['active-swarm-id-label'], activeSp ? `SWARM ID: ${shortKey(activeSp.id)}` : 'P2P MESH SWARM');
+
+    const chs = (activeSp && Array.isArray(activeSp.channels)) ? activeSp.channels : ['general'];
+    chs.forEach((ch) => {
+      const isAct = activeChatMode === 'swarm' && currentChannel === ch;
+      const div = document.createElement('div');
+      div.className = 'channel-item text-ch' + (isAct ? ' active' : '');
+      div.textContent = ch;
+      div.onclick = () => openSwarmChannel(currentSpaceId, ch);
+      container.appendChild(div);
+    });
+  }
+
+  function renderNetworkTelemetry() {
+    const isOnline = Boolean(ws && ws.readyState === WebSocket.OPEN);
+    setText(['net-daemon-state'], isOnline ? 'ONLINE // C99 P2P' : 'RECONNECTING');
+    setText(['net-udp-port'], `UDP :${myUdpPort}`);
+    setText(['net-wan-endpoint'], myWanEndpoint || 'Auto NAT Hole-Punch / DHT Relay');
+    setText(['net-dht-count'], String(myDhtCount));
+    setText(['net-quas-count'], `${myOfflineShards} SHARDS`);
+
+    const pulseDot = getEl('node-pulse-indicator');
+    if (pulseDot) {
+      pulseDot.style.background = isOnline ? '#10b981' : '#f59e0b';
+    }
+
+    const diagLines = [
+      `DAEMON    : ${isOnline ? 'ACTIVE (C99 Native Engine)' : 'RECONNECTING'}`,
+      `LOCAL UDP : 0.0.0.0:${myUdpPort}`,
+      `WAN STUN  : ${myWanEndpoint || 'NAT Traversal / Overlay Relay'}`,
+      `KADEMLIA  : ${myDhtCount} DHT nodes | ${peersCache.length} direct peers | ${myOfflineShards} Quas shards`,
+      `ED25519   : ${myPublicKey}`,
+      `X25519    : ${myX25519Key || 'Derived from Ed25519'}`
+    ];
+
+    if (dhtNodesCache && dhtNodesCache.length > 0) {
+      diagLines.push('--- DHT ROUTING TABLE ---');
+      dhtNodesCache.slice(0, 8).forEach((n) => {
+        diagLines.push(`[B${n.bucket}] ${shortKey(n.id)} -> ${n.ip}:${n.port}`);
+      });
+    }
+
+    setText(['profile-diag-box'], diagLines.join('\n'));
+  }
+
+  function renderIdentityPanel() {
+    window.myPublicKey = myPublicKey;
+    setText(['my-nickname'], myNick);
+    setText(['my-avatar'], (myNick || 'W').charAt(0).toUpperCase());
+    setText(['my-node-status'], myWanEndpoint
+      ? `WAN ${myWanEndpoint} // DHT:${myDhtCount}`
+      : `UDP :${myUdpPort} // DHT:${myDhtCount}`);
+
+    const inviteUri = myInviteUri || (myPublicKey ? `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}&pk=${myPublicKey}` : 'wex://join/...');
+    setText(['key-pubkey-display', 'invite-pk-box', 'identity-pk-box'], myPublicKey || 'Генерация...');
+    setText(['invite-link-box', 'identity-invite-box'], inviteUri);
+
+    const nickInput = getEl('profile-nick-input');
+    if (nickInput && document.activeElement !== nickInput) {
+      nickInput.value = myNick;
+    }
+
+    if (myPublicKey) {
+      renderAllKeyCanvases(myPublicKey);
+    }
+  }
+
+  /* ======================== MESSAGE FEED & E2EE RENDERING ======================== */
+  function messageMatchesCurrentConversation(msg) {
+    if (!msg) return false;
+    const msgCh = msg.channel || 'general';
+
+    if (activeChatMode === 'dm' && currentDmPeerPk) {
+      const expectedDmCh = dmChannelForPk(currentDmPeerPk);
+      if (msgCh.toLowerCase() === expectedDmCh.toLowerCase()) return true;
+
+      const peerPrefix = currentDmPeerPk.toLowerCase().substring(0, 58);
+      if (msgCh.toLowerCase() === 'dm:' + peerPrefix) return true;
+
+      const aPk = (msg.author_pk || '').toLowerCase();
+      const pPk = (msg.peer_pk || '').toLowerCase();
+      if (msgCh.startsWith('dm:') && (aPk.startsWith(peerPrefix) || pPk.startsWith(peerPrefix))) {
+        return true;
+      }
+      return false;
+    }
+
+    if (activeChatMode === 'swarm') {
+      return msgCh === currentChannel;
+    }
+    return false;
+  }
+
+  function renderHistory(historyList) {
+    const feed = getEl('messages', 'chat-messages');
+    if (!feed) return;
+    feed.innerHTML = '';
+
+    const filtered = (historyList || []).filter(messageMatchesCurrentConversation);
+    if (filtered.length === 0) {
+      if (activeChatMode === 'dm' && currentDmPeerPk) {
+        const c = contacts[currentDmPeerPk];
+        const name = c ? c.nickname : shortKey(currentDmPeerPk);
+        feed.innerHTML = `
+          <div class="empty-state">
+            <span class="empty-state-tag">X25519 + CHACHA20-POLY1305 // E2EE ЛС</span>
+            <h3>Личный диалог: ${escapeHtml(name)}</h3>
+            <p style="font-family:var(--font-mono, monospace); font-size:11px; word-break:break-all;">PK: ${escapeHtml(currentDmPeerPk)}</p>
+            <p>Сообщения шифруются сквозным ключом X25519. Если собеседник сейчас офлайн, зашифрованный пакет сохраняется в Quas Store-and-Forward и доставляется при его появлении в сети.</p>
+          </div>`;
+      } else {
+        feed.innerHTML = `
+          <div class="empty-state">
+            <span class="empty-state-tag">ED25519 SIGNED SWARM</span>
+            <h3>Канал #${escapeHtml(currentChannel)}</h3>
+            <p>Сообщения подписываются ключом Ed25519 и синхронизируются напрямую между участниками сварм-канала без центральных серверов.</p>
+          </div>`;
+      }
+      return;
+    }
+
+    filtered.forEach((m) => appendMessageToDom(m));
+  }
+
+  function appendMessageToDom(msg) {
+    const feed = getEl('messages', 'chat-messages');
+    if (!feed) return;
+
+    const emptyEl = feed.querySelector('.empty-state');
+    if (emptyEl) emptyEl.remove();
+
+    const sig = msg.signature || ('local-' + (msg.timestamp_ms || Date.now()));
+    if (sig && document.getElementById('msg-' + sig)) {
+      return;
+    }
+
+    const group = document.createElement('div');
+    group.className = 'msg-group';
+    group.id = 'msg-' + sig;
+    group.onclick = (e) => {
+      if (e.target.closest('.action-btn') || e.target.closest('.attachment-card')) return;
+      const wasSelected = group.classList.contains('selected');
+      document.querySelectorAll('.msg-group.selected').forEach((el) => el.classList.remove('selected'));
+      if (!wasSelected) group.classList.add('selected');
+    };
+
+    const isMine = (msg.author === myNick) || (myPublicKey && msg.author_pk && msg.author_pk.toLowerCase() === myPublicKey.toLowerCase());
+    if (isMine) group.classList.add('mine');
+
+    const initial = (msg.author || 'U').charAt(0).toUpperCase();
+    const isDmMsg = (msg.channel && msg.channel.startsWith('dm:')) || msg.encrypted;
+
+    const verifiedBadge = (msg.verified !== false)
+      ? `<span class="verified-badge">ED25519 ✓</span>`
+      : '';
+    const e2eeBadge = isDmMsg
+      ? `<span class="e2ee-badge">CHACHA20 E2EE</span>`
+      : '';
+
+    let contentHtml = escapeHtml(msg.content || '');
+    if (msg.edited) {
+      contentHtml += ' <span style="font-size:11px; color:#7d8594;">(ред.)</span>';
+    }
+
+    const rawContent = msg.content || '';
+    if (rawContent.startsWith('[FILE:') || rawContent.startsWith('[attachment:')) {
+      const closeIdx = rawContent.indexOf(']');
+      const prefixLen = rawContent.startsWith('[FILE:') ? 6 : 12;
+      if (closeIdx > prefixLen) {
+        const meta = rawContent.substring(prefixLen, closeIdx).split(':');
+        const hash = meta[0];
+        const fname = meta[1] || 'file.bin';
+        const fsize = Number(meta[2] || 0);
+        const mime = meta[3] || 'application/octet-stream';
+        const isImg = mime.startsWith('image/');
+
+        if (ws && ws.readyState === WebSocket.OPEN && !blobCache[hash]) {
+          ws.send(JSON.stringify({ action: 'get_blob', hash: hash }));
+        }
+        const cachedB64 = blobCache[hash];
+        const imgDisplay = (isImg && cachedB64) ? 'style="display:block"' : 'style="display:none"';
+        const imgSrc = (isImg && cachedB64) ? `src="data:${mime};base64,${cachedB64}"` : '';
+
+        contentHtml = `
+          <div class="attachment-card" onclick="downloadBlobAttachment('${escapeHtml(hash)}', '${escapeHtml(fname)}', '${escapeHtml(mime)}')">
+            <span>[BLOB] <strong>${escapeHtml(fname)}</strong> (${Math.max(1, Math.round(fsize / 1024))} KB) — Скачать</span>
+          </div>
+          ${isImg ? `<div class="attachment-preview"><img id="img-${escapeHtml(hash)}" ${imgSrc} ${imgDisplay}/></div>` : ''}
+        `;
+      }
+    }
+
+    const timeStr = msg.time || formatTimestamp(msg.timestamp_ms);
+
+    group.innerHTML = `
+      <div class="msg-avatar">${escapeHtml(initial)}</div>
+      <div class="msg-body">
+        <div class="msg-meta">
+          <span class="msg-author">${escapeHtml(msg.author || 'Anon')}</span>
+          ${verifiedBadge}
+          ${e2eeBadge}
+          <span class="msg-time">${escapeHtml(timeStr)}</span>
+        </div>
+        <div class="msg-content" id="content-${escapeHtml(sig)}">${contentHtml}</div>
+        <div class="reaction-bar" id="reacts-${escapeHtml(sig)}">${escapeHtml(msg.reactions || '')}</div>
+        <div class="msg-actions">
+          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', '+1')">+1</button>
+          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', 'ACK')">ACK</button>
+          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', '🔥')">🔥</button>
+          ${isMine ? `<button class="action-btn" onclick="promptEditMessage('${escapeHtml(sig)}')">EDIT</button>` : ''}
+          ${isMine ? `<button class="action-btn" onclick="deleteMessage('${escapeHtml(sig)}')">DEL</button>` : ''}
+        </div>
+      </div>
+    `;
+
+    feed.appendChild(group);
+    feed.scrollTop = feed.scrollHeight;
+  }
+
+  /* ======================== ACTIONS & COMMAND DISPATCHERS ======================== */
+  function addContactOrConnect(rawTarget, customNick) {
+    const parsed = parseTargetInput(rawTarget);
+    if (!parsed.raw) {
+      showToast('ВВЕДИТЕ PUBLIC KEY (64 HEX), WEX:// ИЛИ IP:PORT');
+      return;
+    }
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        action: 'connect_peer',
+        target: parsed.raw
+      }));
+    }
+
+    if (parsed.pk) {
+      const nick = (customNick && customNick.trim())
+        ? customNick.trim()
+        : (contacts[parsed.pk] ? contacts[parsed.pk].nickname : ('Peer-' + parsed.pk.substring(0, 6)));
+
+      upsertContact(parsed.pk, {
+        nickname: nick,
+        online: contacts[parsed.pk] ? contacts[parsed.pk].online : false
+      });
+      saveContacts();
+      selectTab('dms');
+      openDmConversation(parsed.pk);
+      closeModals();
+      showToast('КОНТАКТ ДОБАВЛЕН // E2EE ЛС ОТКРЫТО');
+    } else {
+      closeModals();
+      showToast('ЗАПРОС НА ПОДКЛЮЧЕНИЕ ОТПРАВЛЕН');
+    }
+  }
+
+  function submitConnectPeer() {
+    const input = getEl('connect-target-input', 'add-contact-input');
+    if (!input || !input.value.trim()) return;
+    const val = input.value.trim();
+    input.value = '';
+    addContactOrConnect(val);
+  }
+
+  function submitCurrentMessage() {
+    const inputEl = getEl('msg-input', 'chat-input');
+    if (!inputEl) return;
+    const text = inputEl.value.trim();
+    if (!text) return;
+
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      showToast('ОЖИДАНИЕ ЛОКАЛЬНОГО ДЕМОНА...');
+      return;
+    }
+
+    if (activeChatMode === 'dm' && currentDmPeerPk) {
+      ws.send(JSON.stringify({
+        action: 'send_dm',
+        target_pk: currentDmPeerPk,
+        text: text
+      }));
+      upsertContact(currentDmPeerPk, {
+        last_msg: text,
+        last_ts: Date.now()
+      });
+      saveContacts();
+      renderContactList();
+    } else {
+      ws.send(JSON.stringify({
+        action: 'send_message',
+        space_id: currentSpaceId,
+        channel: currentChannel,
+        text: text
+      }));
+    }
+
+    inputEl.value = '';
+  }
+
+  function switchSpace(spaceId) {
+    const sp = spacesCache.find((s) => s.id === spaceId);
+    if (!sp) return;
+    currentSpaceId = sp.id;
+    renderSpacesList();
+    renderChannelsList();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'switch_space', space_id: spaceId }));
+    }
+    if (sp.channels && sp.channels.length > 0) {
+      openSwarmChannel(sp.id, sp.channels[0]);
+    }
+  }
+
+  function switchChannel(ch) {
+    openSwarmChannel(currentSpaceId, ch);
+  }
+
+  function startDirectMessage(peerOrPk) {
+    if (!peerOrPk) return;
+    if (typeof peerOrPk === 'string') {
+      openDmConversation(peerOrPk);
+    } else if (peerOrPk.public_key) {
+      upsertContact(peerOrPk.public_key, {
+        nickname: peerOrPk.nickname || ('Peer-' + peerOrPk.public_key.substring(0, 6)),
+        ip: peerOrPk.ip || '',
+        port: peerOrPk.port || 0,
+        online: true
+      });
+      saveContacts();
+      openDmConversation(peerOrPk.public_key);
+    }
+  }
+
+  function saveProfileNick() {
+    const input = getEl('profile-nick-input');
+    if (!input) return;
+    const newNick = input.value.trim();
+    if (newNick && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'set_profile', nickname: newNick, status: 'Online' }));
+      showToast('ПСЕВДОНИМ СОХРАНЕН');
+    }
+    closeModals();
+  }
+
+  function toggleSeedReveal() {
+    const box = getEl('seed-hex-box');
+    if (!box) return;
+    const willReveal = !box.classList.contains('revealed');
+    box.classList.toggle('revealed', willReveal);
+    if (willReveal && !myExportedSeed && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'export_secret' }));
+    }
+  }
+
+  function exportMasterSeed() {
+    if (myExportedSeed) {
+      copyTextWithToast(myExportedSeed, 'MASTER SEED СКОПИРОВАН');
+      return;
+    }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'export_secret' }));
+    }
+  }
+
+  function copyMasterSeed() {
+    exportMasterSeed();
+  }
+
+  function importMasterSeed(seedHexArg) {
+    const input = getEl('seed-import-input', 'import-seed-input');
+    const seedHex = (seedHexArg || (input ? input.value : '')).trim();
+    if (!isValidHex64(seedHex)) {
+      showToast('ВВЕДИТЕ КОРРЕКТНЫЙ 64-HEX MASTER SEED');
+      return;
+    }
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'import_secret', seed_hex: seedHex }));
+      if (input) input.value = '';
+      showToast('MASTER SEED ИМПОРТИРОВАН');
+    }
+  }
+
+  function submitImportSeed() {
+    importMasterSeed();
+  }
+
+  function triggerLanBeacon() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'lan_beacon' }));
+      showToast('LAN BEACON ОТПРАВЛЕН (UDP :9009)');
+    }
+  }
+
+  function triggerLanDiscovery() {
+    triggerLanBeacon();
+  }
+
+  function triggerStunProbe() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'stun_probe' }));
+      showToast('STUN PROBE ЗАПУЩЕН...');
+    }
+  }
+
+  function triggerPullOffline() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'pull_offline' }));
+      showToast('СИНХРОНИЗАЦИЯ QUAS...');
+    }
+  }
+
+  /* ======================== FILE BLOBS, REACTIONS & VOICE ======================== */
+  function handleFileUpload(e) {
+    const file = e && e.target && e.target.files ? e.target.files[0] : null;
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      showToast('МАКС. РАЗМЕР ФАЙЛА: 2 МБ');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const commaIdx = String(reader.result).indexOf(',');
+      const b64 = commaIdx >= 0 ? String(reader.result).substring(commaIdx + 1) : '';
+      if (ws && ws.readyState === WebSocket.OPEN && b64) {
+        ws.send(JSON.stringify({
+          action: 'upload_blob',
+          filename: file.name,
+          mime_type: file.type || 'application/octet-stream',
+          channel: currentChannel,
+          data_base64: b64
+        }));
+        showToast('ОТПРАВКА P2P BLOB...');
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  function downloadBlobAttachment(hash, filename, mime) {
+    if (blobCache[hash]) {
+      const a = document.createElement('a');
+      a.href = `data:${mime || 'application/octet-stream'};base64,${blobCache[hash]}`;
+      a.download = filename || 'attachment.bin';
+      a.click();
+    } else if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ action: 'get_blob', hash: hash }));
+      showToast('ЗАГРУЗКА БЛОБА ИЗ P2P...');
+    }
+  }
+
+  function sendReaction(targetSig, emoji) {
+    if (!targetSig || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      action: 'send_reaction',
+      target_sig: targetSig,
+      emoji: emoji
+    }));
+  }
+
+  function promptEditMessage(targetSig) {
+    if (!targetSig) return;
+    const el = document.getElementById('content-' + targetSig);
+    const oldText = el ? el.textContent.replace(' (ред.)', '') : '';
+    openInputModal('edit_message', targetSig, oldText);
+  }
+
+  function deleteMessage(targetSig) {
+    if (!targetSig || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      action: 'delete_message',
+      target_sig: targetSig
+    }));
+    showToast('ПАКЕТ УДАЛЕН');
+  }
+
+  async function toggleVoiceConnect(channel) {
+    const targetCh = channel || voiceChannelName || 'voice-lounge';
+    voiceChannelName = targetCh;
+
+    if (voiceConnected) {
+      if (micStream) {
+        micStream.getTracks().forEach((t) => t.stop());
+        micStream = null;
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'leave_voice' }));
+      }
+    } else {
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (!audioCtx) audioCtx = new AudioContextClass({ sampleRate: 48000 });
+          const source = audioCtx.createMediaStreamSource(micStream);
+          const processor = audioCtx.createScriptProcessor(1024, 1, 1);
+          source.connect(processor);
+          processor.connect(audioCtx.destination);
+          processor.onaudioprocess = (e) => {
+            if (!voiceConnected || !ws || ws.readyState !== WebSocket.OPEN) return;
+            const inputData = e.inputBuffer.getChannelData(0);
+            const pcm16 = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+              pcm16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+            }
+            const uint8 = new Uint8Array(pcm16.buffer);
+            let binary = '';
+            for (let i = 0; i < uint8.byteLength; i++) {
+              binary += String.fromCharCode(uint8[i]);
+            }
+            ws.send(JSON.stringify({
+              action: 'voice_data',
+              channel: targetCh,
+              data_base64: btoa(binary)
+            }));
+          };
+        }
+      } catch (err) {
+        console.warn('Voice listen-only fallback:', err);
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'join_voice', channel: targetCh }));
+      }
+    }
+  }
+
+  function playVoiceChunk(b64) {
+    if (!voiceConnected || !b64) return;
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!audioCtx) audioCtx = new AudioContextClass({ sampleRate: 48000 });
+      const binary = atob(b64);
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+      const pcm16 = new Int16Array(bytes.buffer);
+      const floatData = new Float32Array(pcm16.length);
+      for (let i = 0; i < pcm16.length; i++) floatData[i] = pcm16[i] / 32768.0;
+
+      const buffer = audioCtx.createBuffer(1, floatData.length, 48000);
+      buffer.getChannelData(0).set(floatData);
+      const srcNode = audioCtx.createBufferSource();
+      srcNode.buffer = buffer;
+      srcNode.connect(audioCtx.destination);
+      srcNode.start();
+    } catch (e) {}
+  }
+
+  /* ======================== MODALS ======================== */
+  function closeModals() {
+    document.querySelectorAll('.modal-overlay').forEach((m) => m.classList.remove('open'));
+    pendingModalAction = null;
+    pendingTargetSig = null;
+  }
+
+  function openInviteModal() {
+    renderIdentityPanel();
+    const m = getEl('modal-invite');
+    if (m) m.classList.add('open');
+  }
+
+  function openConnectModal() {
+    const m = getEl('modal-connect');
+    const inp = getEl('connect-target-input', 'add-contact-input');
+    if (inp) inp.value = '';
+    if (m) {
+      m.classList.add('open');
+      setTimeout(() => { if (inp) inp.focus(); }, 60);
+    }
+  }
+
+  function openProfileModal() {
+    selectTab('key');
+    const m = getEl('modal-profile');
+    if (m) m.classList.add('open');
+  }
+
+  function openInputModal(actionType, targetSig, initialValue) {
+    pendingModalAction = actionType;
+    pendingTargetSig = targetSig || null;
+
+    const titleEl = getEl('modal-input-title');
+    const labelEl = getEl('modal-input-label');
+    const fieldEl = getEl('modal-input-field');
+
+    if (actionType === 'create_space') {
+      if (titleEl) titleEl.textContent = 'НОВЫЙ СВАРМ // СООБЩЕСТВО';
+      if (labelEl) labelEl.textContent = 'НАЗВАНИЕ СВАРМА';
+      if (fieldEl) {
+        fieldEl.placeholder = 'Например: Core Dev Swarm';
+        fieldEl.value = '';
+      }
+    } else if (actionType === 'create_channel') {
+      if (titleEl) titleEl.textContent = 'НОВЫЙ КАНАЛ В СВАРМЕ';
+      if (labelEl) labelEl.textContent = 'ИМЯ КАНАЛА';
+      if (fieldEl) {
+        fieldEl.placeholder = 'Например: architecture';
+        fieldEl.value = '';
+      }
+    } else if (actionType === 'edit_message') {
+      if (titleEl) titleEl.textContent = 'РЕДАКТИРОВАТЬ ПАКЕТ';
+      if (labelEl) labelEl.textContent = 'НОВЫЙ ТЕКСТ (ПОДПИСЬ ED25519)';
+      if (fieldEl) {
+        fieldEl.placeholder = '';
+        fieldEl.value = initialValue || '';
+      }
+    }
+
+    const m = getEl('modal-input');
+    if (m) {
+      m.classList.add('open');
+      setTimeout(() => { if (fieldEl) fieldEl.focus(); }, 60);
+    }
+  }
+
+  function submitInputModal() {
+    const fieldEl = getEl('modal-input-field');
+    const val = fieldEl ? fieldEl.value.trim() : '';
+    if (!val || !ws || ws.readyState !== WebSocket.OPEN) {
+      closeModals();
+      return;
+    }
+
+    if (pendingModalAction === 'create_space') {
+      ws.send(JSON.stringify({ action: 'create_space', name: val }));
+      showToast('СВАРМ СОЗДАН');
+    } else if (pendingModalAction === 'create_channel') {
+      ws.send(JSON.stringify({ action: 'create_channel', name: val }));
+      showToast('КАНАЛ СОЗДАН');
+    } else if (pendingModalAction === 'edit_message' && pendingTargetSig) {
+      ws.send(JSON.stringify({ action: 'edit_message', target_sig: pendingTargetSig, text: val }));
+    }
+    closeModals();
+  }
+
+  function toggleMobileDrawer(forceState) {
+    if (typeof forceState === 'boolean') {
+      document.body.classList.toggle('drawer-open', forceState);
+      if (forceState) document.body.classList.remove('chat-active');
+    } else {
+      document.body.classList.toggle('drawer-open');
+    }
+  }
+
+  /* ======================== WEBSOCKET CONNECTION & EVENT LOOP ======================== */
+  function handleIncomingWsMessage(data) {
+    if (!data || !data.type) return;
+
+    if (data.type === 'status') {
+      if (data.identity) {
+        myNick = data.identity.nickname || 'User';
+        myStatus = data.identity.status || 'Online';
+        myUdpPort = data.identity.udp_port || 9001;
+        myPublicKey = data.identity.public_key || '';
+        window.myPublicKey = myPublicKey;
+        myX25519Key = data.identity.x25519_key || '';
+        myInviteUri = data.identity.invite_uri || '';
+        myDhtCount = data.identity.dht_contacts || 0;
+        myOfflineShards = data.identity.offline_shards || 0;
+        myWanEndpoint = data.identity.external_endpoint || '';
+      }
+
+      if (Array.isArray(data.spaces) && data.spaces.length > 0) {
+        spacesCache = data.spaces;
+        const activeSp = data.spaces.find((s) => s.id === currentSpaceId) || data.spaces[0];
+        currentSpaceId = activeSp.id;
+      }
+
+      if (Array.isArray(data.peers)) {
+        peersCache = data.peers;
+      }
+
+      if (Array.isArray(data.dht_nodes)) {
+        dhtNodesCache = data.dht_nodes;
+      }
+
+      if (Array.isArray(data.history)) {
+        historyCache = data.history;
+      }
+
+      mergePeersAndHistoryIntoContacts(peersCache, historyCache);
+
+      if (!currentDmPeerPk && activeChatMode === 'dm') {
+        const contactKeys = Object.keys(contacts);
+        if (contactKeys.length > 0) {
+          currentDmPeerPk = contactKeys[0];
+          currentChannel = dmChannelForPk(currentDmPeerPk);
+        }
+      }
+
+      renderIdentityPanel();
+      renderContactList();
+      renderPeersList();
+      renderSpacesList();
+      renderChannelsList();
+      renderNetworkTelemetry();
+      updateChatHeader();
+      renderHistory(historyCache);
+
+      if (data.voice) {
+        voiceConnected = Boolean(data.voice.connected);
+        const vBar = getEl('voice-bar');
+        const vBtn = getEl('voice-btn');
+        const vBadge = getEl('voice-badge');
+        if (vBar) vBar.classList.toggle('active', voiceConnected);
+        if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
+        if (vBadge) vBadge.textContent = voiceConnected ? 'АКТИВЕН' : 'ВОЙТИ';
+      }
+      return;
+    }
+
+    if (data.type === 'peer_joined' || data.type === 'peer_left') {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'get_status' }));
+      }
+      return;
+    }
+
+    if (data.type === 'message') {
+      const isDup = data.signature && historyCache.some((m) => m.signature === data.signature);
+      if (!isDup) {
+        historyCache.push(data);
+      }
+
+      const isFromMe = (data.author === myNick) || (myPublicKey && data.author_pk && data.author_pk.toLowerCase() === myPublicKey.toLowerCase());
+      const isDm = typeof data.channel === 'string' && data.channel.startsWith('dm:');
+
+      if (isDm) {
+        const dmPrefix = data.channel.substring(3).toLowerCase();
+        let peerKey = null;
+        if (!isFromMe && data.author_pk && isValidHex64(data.author_pk)) {
+          peerKey = data.author_pk.toLowerCase();
+        } else if (data.peer_pk && isValidHex64(data.peer_pk)) {
+          peerKey = data.peer_pk.toLowerCase();
+        } else {
+          peerKey = findContactKeyByPrefix(dmPrefix) || dmPrefix;
+        }
+
+        if (peerKey) {
+          const isCurrentlyOpen = activeChatMode === 'dm' && currentDmPeerPk && currentDmPeerPk.startsWith(peerKey.substring(0, 58)) &&
+            (window.innerWidth >= 768 || document.body.classList.contains('chat-active'));
+          const prevUnread = contacts[peerKey] ? (contacts[peerKey].unread || 0) : 0;
+
+          upsertContact(peerKey, {
+            nickname: (!isFromMe && data.author) ? data.author : (contacts[peerKey] ? contacts[peerKey].nickname : undefined),
+            last_msg: data.content || '',
+            last_ts: data.timestamp_ms || Date.now(),
+            unread: (!isFromMe && !isCurrentlyOpen) ? prevUnread + 1 : 0
+          });
+          saveContacts();
+          renderContactList();
+        }
+      }
+
+      if (!isFromMe) {
+        playIncomingDmTick();
+      }
+
+      if (messageMatchesCurrentConversation(data)) {
+        appendMessageToDom(data);
+      }
+      return;
+    }
+
+    if (data.type === 'secret_exported') {
+      myExportedSeed = data.seed_hex || '';
+      setText(['seed-hex-box', 'exported-seed-box', 'master-seed-box'], myExportedSeed);
+      copyTextWithToast(myExportedSeed, 'MASTER SEED (64 HEX) СКОПИРОВАН');
+      return;
+    }
+
+    if (data.type === 'reaction_updated') {
+      const el = document.getElementById('reacts-' + data.target_sig);
+      if (el) el.textContent = data.summary || '';
+      return;
+    }
+
+    if (data.type === 'message_edited') {
+      const el = document.getElementById('content-' + data.target_sig);
+      if (el) el.textContent = (data.content || '') + ' (ред.)';
+      return;
+    }
+
+    if (data.type === 'message_deleted') {
+      const el = document.getElementById('content-' + data.target_sig);
+      if (el) {
+        el.textContent = '[Пакет удален автором]';
+        el.style.color = '#7d8594';
+      }
+      return;
+    }
+
+    if (data.type === 'voice_state') {
+      voiceConnected = Boolean(data.connected);
+      const vBar = getEl('voice-bar');
+      const vBtn = getEl('voice-btn');
+      const vBadge = getEl('voice-badge');
+      if (vBar) vBar.classList.toggle('active', voiceConnected);
+      if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
+      if (vBadge) vBadge.textContent = voiceConnected ? 'АКТИВЕН' : 'ВОЙТИ';
+      return;
+    }
+
+    if (data.type === 'voice_stream') {
+      playVoiceChunk(data.data_base64);
+      return;
+    }
+
+    if (data.type === 'blob_data') {
+      blobCache[data.hash] = data.data_base64;
+      const img = document.getElementById('img-' + data.hash);
+      if (img) {
+        img.src = 'data:image/png;base64,' + data.data_base64;
+        img.style.display = 'block';
+      }
+      return;
+    }
+
+    if (data.type === 'blob_received') {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'get_blob', hash: data.hash }));
+      }
+    }
+  }
+
+  function connectWS() {
+    clearTimeout(reconnectTimer);
+    const loc = window.location;
+    const wsUrl = (loc.protocol === 'https:' ? 'wss://' : 'ws://') + (loc.host || '127.0.0.1:9000');
+
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      reconnectTimer = setTimeout(connectWS, 1200);
+      return;
+    }
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ action: 'get_status' }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        handleIncomingWsMessage(data);
+      } catch (e) {}
+    };
+
+    ws.onclose = () => {
+      setText(['my-node-status'], 'RECONNECTING...');
+      renderNetworkTelemetry();
+      reconnectTimer = setTimeout(connectWS, 1200);
+    };
+  }
+
+  /* ======================== VIEWPORT & KEYBOARD LISTENERS ======================== */
+  function bindEvents() {
     if (window.visualViewport) {
       const updateViewportHeight = () => {
-        document.getElementById('app-root').style.height = window.visualViewport.height + 'px';
-        const feed = document.getElementById('messages');
+        const root = getEl('app-root');
+        if (root) {
+          root.style.height = window.visualViewport.height + 'px';
+        }
+        const feed = getEl('messages', 'chat-messages');
         if (feed) feed.scrollTop = feed.scrollHeight;
       };
       window.visualViewport.addEventListener('resize', updateViewportHeight);
     }
 
-    /* Touch swipe gesture to open/close sidebar drawer on phones & tablets */
-    let touchStartX = 0;
-    let touchStartY = 0;
-    document.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 1) {
-        touchStartX = e.touches[0].clientX;
-        touchStartY = e.touches[0].clientY;
-      }
-    }, { passive: true });
-
-    document.addEventListener('touchend', (e) => {
-      if (e.changedTouches.length === 1) {
-        const dx = e.changedTouches[0].clientX - touchStartX;
-        const dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
-        if (dy < 60) {
-          if (touchStartX < 40 && dx > 65) {
-            toggleMobileDrawer(true);
-          } else if (document.body.classList.contains('drawer-open') && dx < -65) {
-            toggleMobileDrawer(false);
-          }
+    const msgInput = getEl('msg-input', 'chat-input');
+    if (msgInput) {
+      msgInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          submitCurrentMessage();
         }
-      }
-    }, { passive: true });
-
-    function showToast(msg) {
-      const t = document.getElementById('toast');
-      t.innerText = msg;
-      t.classList.add('show');
-      setTimeout(() => t.classList.remove('show'), 2200);
-    }
-
-    function copyTextWithToast(text, toastMsg) {
-      if (!text) return;
-      if (window.AndroidBridge && window.AndroidBridge.copyText) {
-        window.AndroidBridge.copyText(text);
-        showToast(toastMsg || 'Скопировано!');
-        return;
-      }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(() => showToast(toastMsg || 'Скопировано!'));
-      } else {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        showToast(toastMsg || 'Скопировано!');
-      }
-    }
-
-    async function pasteIntoInput(inputId) {
-      const el = document.getElementById(inputId);
-      if (!el) return;
-      if (window.AndroidBridge && window.AndroidBridge.pasteText) {
-        const clip = window.AndroidBridge.pasteText();
-        if (clip) {
-          el.value = clip.trim();
-          showToast('Вставлено из буфера');
-          return;
-        }
-      }
-      if (navigator.clipboard && navigator.clipboard.readText) {
-        try {
-          const clip = await navigator.clipboard.readText();
-          if (clip) {
-            el.value = clip.trim();
-            showToast('Вставлено из буфера');
-          }
-        } catch (e) {
-          el.focus();
-        }
-      } else {
-        el.focus();
-      }
-    }
-
-    function shareInviteNative() {
-      const link = myInviteUri || `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}&pk=${myPublicKey}`;
-      if (window.AndroidBridge && window.AndroidBridge.shareText) {
-        window.AndroidBridge.shareText(link);
-      } else if (navigator.share) {
-        navigator.share({ title: 'Wex-Chat Инвайт', text: link }).catch(() => {});
-      } else {
-        copyTextWithToast(link, 'Ссылка скопирована!');
-      }
-    }
-
-    function closeModals() {
-      document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('open'));
-      pendingModalAction = null;
-      pendingTargetSig = null;
-    }
-
-    function openInviteModal() {
-      const link = myInviteUri || `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}&pk=${myPublicKey}`;
-      document.getElementById('invite-link-box').innerText = link;
-      document.getElementById('invite-pk-box').innerText = myPublicKey || 'Генерация...';
-      document.getElementById('modal-invite').classList.add('open');
-    }
-
-    function openConnectModal() {
-      toggleMobileDrawer(false);
-      document.getElementById('connect-target-input').value = '';
-      document.getElementById('modal-connect').classList.add('open');
-      setTimeout(() => document.getElementById('connect-target-input').focus(), 80);
-    }
-
-    function submitConnectPeer() {
-      const target = document.getElementById('connect-target-input').value.trim();
-      if (!target) return;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'connect_peer', target: target }));
-        showToast('Запрос на подключение отправлен');
-      }
-      closeModals();
-    }
-
-    function openProfileModal() {
-      toggleMobileDrawer(false);
-      document.getElementById('profile-nick-input').value = myNick;
-      const diag = [
-        `Статус демона: ${ws && ws.readyState === WebSocket.OPEN ? 'Активен (P2P Ready)' : 'Переподключение'}`,
-        `Локальный порт: UDP :${myUdpPort}`,
-        `Внешний WAN STUN: ${myWanEndpoint || 'Auto Relay / NAT Punch'}`,
-        `Узлов в DHT: ${myDhtCount} | Пиров: ${peersCache.length}`,
-        `Ed25519 ID: ${myPublicKey}`
-      ].join('\n');
-      document.getElementById('profile-diag-box').innerText = diag;
-      document.getElementById('modal-profile').classList.add('open');
-    }
-
-    function saveProfileNick() {
-      const newNick = document.getElementById('profile-nick-input').value.trim();
-      if (newNick && ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'set_profile', nickname: newNick, status: 'Online' }));
-        showToast('Никнейм обновлён!');
-      }
-      closeModals();
-    }
-
-    function openInputModal(actionType, targetSig, initialValue) {
-      toggleMobileDrawer(false);
-      pendingModalAction = actionType;
-      pendingTargetSig = targetSig || null;
-      const titleEl = document.getElementById('modal-input-title');
-      const labelEl = document.getElementById('modal-input-label');
-      const fieldEl = document.getElementById('modal-input-field');
-
-      if (actionType === 'create_space') {
-        titleEl.innerText = 'Новое сообщество';
-        labelEl.innerText = 'Название сообщества (Space)';
-        fieldEl.placeholder = 'Например: Киберпанк Клуб';
-        fieldEl.value = '';
-      } else if (actionType === 'create_channel') {
-        titleEl.innerText = 'Новый текстовый канал';
-        labelEl.innerText = 'Имя канала';
-        fieldEl.placeholder = 'Например: offtopic';
-        fieldEl.value = '';
-      } else if (actionType === 'edit_message') {
-        titleEl.innerText = 'Редактировать сообщение';
-        labelEl.innerText = 'Новый текст сообщения';
-        fieldEl.placeholder = '';
-        fieldEl.value = initialValue || '';
-      }
-      document.getElementById('modal-input').classList.add('open');
-      setTimeout(() => fieldEl.focus(), 80);
-    }
-
-    function submitInputModal() {
-      const val = document.getElementById('modal-input-field').value.trim();
-      if (!val || !ws || ws.readyState !== WebSocket.OPEN) {
-        closeModals();
-        return;
-      }
-      if (pendingModalAction === 'create_space') {
-        ws.send(JSON.stringify({ action: 'create_space', name: val }));
-        showToast('Сообщество создано');
-      } else if (pendingModalAction === 'create_channel') {
-        ws.send(JSON.stringify({ action: 'create_channel', name: val }));
-        showToast('Канал создан');
-      } else if (pendingModalAction === 'edit_message' && pendingTargetSig) {
-        ws.send(JSON.stringify({ action: 'edit_message', target_sig: pendingTargetSig, text: val }));
-      }
-      closeModals();
-    }
-
-    document.getElementById('modal-input-field').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') submitInputModal();
-    });
-    document.getElementById('connect-target-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') submitConnectPeer();
-    });
-
-    function connectWS() {
-      const loc = window.location;
-      const wsUrl = (loc.protocol === 'https:' ? 'wss://' : 'ws://') + (loc.host || '127.0.0.1:9000');
-      ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ action: 'get_status' }));
-      };
-
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'status') {
-          myNick = data.identity.nickname;
-          myUdpPort = data.identity.udp_port || 9001;
-          myPublicKey = data.identity.public_key || '';
-          myInviteUri = data.identity.invite_uri || '';
-          myDhtCount = data.identity.dht_contacts || 0;
-          myWanEndpoint = data.identity.external_endpoint || '';
-          document.getElementById('my-nickname').innerText = myNick;
-          document.getElementById('my-avatar').innerText = myNick.charAt(0).toUpperCase();
-          document.getElementById('my-node-status').innerText = myWanEndpoint
-            ? `WAN ${myWanEndpoint} | DHT:${myDhtCount}`
-            : `UDP :${myUdpPort} | DHT:${myDhtCount}`;
-
-          if (data.spaces && data.spaces.length > 0) {
-            spacesCache = data.spaces;
-            renderGuilds(data.spaces);
-            const activeSp = data.spaces.find(s => s.id === currentSpaceId) || data.spaces[0];
-            currentSpaceId = activeSp.id;
-            document.getElementById('server-title').innerText = activeSp.name;
-            renderChannels(activeSp.channels);
-          }
-          if (data.peers) {
-            peersCache = data.peers;
-            renderPeers(data.peers);
-          }
-          if (data.history) {
-            renderHistory(data.history);
-          }
-          if (data.voice) {
-            voiceConnected = data.voice.connected;
-            document.getElementById('voice-bar').classList.toggle('active', data.voice.connected);
-            document.getElementById('voice-btn').classList.toggle('connected', data.voice.connected);
-            document.getElementById('voice-badge').innerText = data.voice.connected ? 'Подключен' : 'Войти';
-          }
-        } else if (data.type === 'peer_joined' || data.type === 'peer_left') {
-          ws.send(JSON.stringify({ action: 'get_status' }));
-        } else if (data.type === 'message') {
-          appendMessage(data);
-        } else if (data.type === 'reaction_updated') {
-          const el = document.getElementById('reacts-' + data.target_sig);
-          if (el) el.innerText = data.summary;
-        } else if (data.type === 'message_edited') {
-          const el = document.getElementById('content-' + data.target_sig);
-          if (el) el.innerText = data.content + ' (ред.)';
-        } else if (data.type === 'message_deleted') {
-          const el = document.getElementById('content-' + data.target_sig);
-          if (el) {
-            el.innerText = '[Сообщение удалено]';
-            el.style.color = 'var(--text-muted)';
-          }
-        } else if (data.type === 'voice_state') {
-          voiceConnected = data.connected;
-          document.getElementById('voice-bar').classList.toggle('active', data.connected);
-          document.getElementById('voice-btn').classList.toggle('connected', data.connected);
-          document.getElementById('voice-badge').innerText = data.connected ? 'Подключен' : 'Войти';
-        } else if (data.type === 'voice_stream') {
-          playVoiceChunk(data.data_base64);
-        } else if (data.type === 'blob_data') {
-          blobCache[data.hash] = data.data_base64;
-          const img = document.getElementById(`img-${data.hash}`);
-          if (img) {
-            img.src = `data:image/png;base64,${data.data_base64}`;
-            img.style.display = 'block';
-          }
-        } else if (data.type === 'blob_received') {
-          ws.send(JSON.stringify({ action: 'get_blob', hash: data.hash }));
-        }
-      };
-
-      ws.onclose = () => {
-        document.getElementById('my-node-status').innerText = 'Переподключение...';
-        setTimeout(connectWS, 1200);
-      };
-    }
-
-    function renderHistory(historyList) {
-      const feed = document.getElementById('messages');
-      feed.innerHTML = '';
-      const filtered = (historyList || []).filter(m => !m.channel || m.channel === currentChannel);
-      if (filtered.length === 0) {
-        feed.innerHTML = `
-          <div class="empty-state">
-            <h3>Канал ${currentChannel.startsWith('dm:') ? 'ЛС 🔒' : '#' + escapeHtml(currentChannel)}</h3>
-            <p>Здесь пока нет сообщений. Напишите первое сообщение или пригласите друга по кнопке «Инвайт»!</p>
-          </div>`;
-        return;
-      }
-      filtered.forEach(appendMessage);
-    }
-
-    function renderGuilds(spaces) {
-      const container = document.getElementById('guilds-bar');
-      container.innerHTML = '';
-      spaces.forEach(sp => {
-        const div = document.createElement('div');
-        div.className = 'guild-icon' + (sp.id === currentSpaceId ? ' active' : '');
-        div.innerText = (sp.name || 'W').charAt(0).toUpperCase();
-        div.title = sp.name;
-        div.onclick = () => switchSpace(sp.id);
-        container.appendChild(div);
-      });
-      const addBtn = document.createElement('div');
-      addBtn.className = 'guild-icon add-btn';
-      addBtn.title = 'Создать сообщество';
-      addBtn.innerText = '+';
-      addBtn.onclick = () => openInputModal('create_space');
-      container.appendChild(addBtn);
-    }
-
-    function switchSpace(spaceId) {
-      const sp = spacesCache.find(s => s.id === spaceId);
-      if (!sp) return;
-      currentSpaceId = sp.id;
-      document.getElementById('server-title').innerText = sp.name;
-      renderGuilds(spacesCache);
-      renderChannels(sp.channels);
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'switch_space', space_id: spaceId }));
-      }
-      if (sp.channels && sp.channels.length > 0) {
-        switchChannel(sp.channels[0]);
-      }
-    }
-
-    function renderChannels(channels) {
-      const container = document.getElementById('channel-container');
-      container.innerHTML = '';
-      channels.forEach(ch => {
-        const div = document.createElement('div');
-        div.className = 'channel-item text-ch' + (ch === currentChannel ? ' active' : '');
-        div.innerText = ch;
-        div.onclick = () => switchChannel(ch, div);
-        container.appendChild(div);
       });
     }
 
-    function renderPeers(peers) {
-      const container = document.getElementById('peer-container');
-      container.innerHTML = '';
-      if (!peers || peers.length === 0) {
-        container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding:4px 10px;">Нет активных пиров</div>';
-        return;
-      }
-      peers.forEach(p => {
-        const item = document.createElement('div');
-        item.className = 'peer-item';
-        item.innerHTML = `
-          <div class="peer-left">
-            <span class="peer-dot"></span>
-            <span class="peer-name">${escapeHtml(p.nickname)}</span>
-          </div>
-          <span class="dm-badge">ЛС 🔒</span>
-        `;
-        item.onclick = () => startDirectMessage(p);
-        container.appendChild(item);
+    const connectInput = getEl('connect-target-input', 'add-contact-input');
+    if (connectInput) {
+      connectInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitConnectPeer();
+        }
       });
     }
 
-    function startDirectMessage(peer) {
-      if (!peer || !peer.public_key) return;
-      const dmChannel = 'dm:' + peer.public_key.substring(0, 58);
-      currentDmPeerPk = peer.public_key;
-      openDms.add(JSON.stringify({ channel: dmChannel, nick: peer.nickname, pk: peer.public_key }));
-      renderDmList();
-      switchDm(dmChannel, peer.nickname, peer.public_key);
-    }
-
-    function renderDmList() {
-      const container = document.getElementById('dm-container');
-      container.innerHTML = '';
-      if (openDms.size === 0) {
-        container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding: 4px 10px;">Нажмите на пира для ЛС</div>';
-        return;
-      }
-      openDms.forEach(dmJson => {
-        const item = JSON.parse(dmJson);
-        const div = document.createElement('div');
-        div.className = 'channel-item' + (item.channel === currentChannel ? ' active' : '');
-        div.innerText = '🔒 ' + item.nick;
-        div.onclick = () => switchDm(item.channel, item.nick, item.pk);
-        container.appendChild(div);
+    const modalInput = getEl('modal-input-field');
+    if (modalInput) {
+      modalInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitInputModal();
+        }
       });
     }
+  }
 
-    function toggleMobileDrawer(forceState) {
-      if (typeof forceState === 'boolean') {
-        document.body.classList.toggle('drawer-open', forceState);
-      } else {
-        document.body.classList.toggle('drawer-open');
-      }
-    }
-
-    function switchDm(dmChannel, nick, pk) {
-      currentChannel = dmChannel;
-      currentDmPeerPk = pk;
-      document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
-      renderDmList();
-      document.getElementById('channel-prefix').innerText = '🔒';
-      document.getElementById('active-channel-name').innerText = nick;
-      document.getElementById('active-channel-topic').innerText = '| E2EE Private Channel';
-      document.getElementById('msg-input').placeholder = `Личное сообщение @${nick}...`;
-      toggleMobileDrawer(false);
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'get_status' }));
-      }
-    }
-
-    function switchChannel(ch, elem) {
-      currentChannel = ch;
-      currentDmPeerPk = null;
-      document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
-      if (elem) elem.classList.add('active');
-      renderDmList();
-      document.getElementById('channel-prefix').innerText = '#';
-      document.getElementById('active-channel-name').innerText = ch;
-      document.getElementById('active-channel-topic').innerText = '| Sovereign P2P Swarm';
-      document.getElementById('msg-input').placeholder = `Написать в #${ch}...`;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'switch_channel', name: ch }));
-      }
-      toggleMobileDrawer(false);
-    }
-
-    function handleFileUpload(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      if (file.size > 2 * 1024 * 1024) {
-        showToast('Макс. размер файла: 2 МБ');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const b64 = reader.result.split(',')[1];
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            action: 'upload_blob',
-            filename: file.name,
-            mime_type: file.type || 'application/octet-stream',
-            channel: currentChannel,
-            data_base64: b64
-          }));
-          showToast('Отправка файла в P2P...');
-        }
-      };
-      reader.readAsDataURL(file);
-      e.target.value = '';
-    }
-
-    function downloadBlobAttachment(hash, filename, mime) {
-      if (blobCache[hash]) {
-        const a = document.createElement('a');
-        a.href = `data:${mime};base64,${blobCache[hash]}`;
-        a.download = filename;
-        a.click();
-      } else if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'get_blob', hash: hash }));
-        showToast('Загрузка файла из P2P-сети...');
-      }
-    }
-
-    function appendMessage(msg) {
-      if (msg.channel && msg.channel !== currentChannel) return;
-
-      const feed = document.getElementById('messages');
-      const emptyEl = feed.querySelector('.empty-state');
-      if (emptyEl) emptyEl.remove();
-
-      const group = document.createElement('div');
-      group.className = 'msg-group';
-      group.onclick = (e) => {
-        if (e.target.closest('.action-btn') || e.target.closest('.attachment-card')) return;
-        const wasSelected = group.classList.contains('selected');
-        document.querySelectorAll('.msg-group.selected').forEach(el => el.classList.remove('selected'));
-        if (!wasSelected) group.classList.add('selected');
-      };
-
-      const initial = (msg.author || 'U').charAt(0).toUpperCase();
-      const colors = ['#5865f2', '#e67e22', '#23a55a', '#e91e63', '#9b59b6'];
-      const color = colors[initial.charCodeAt(0) % colors.length];
-
-      const verifiedHtml = msg.verified ? `<span class="verified-badge">✓ Ed25519</span>` : '';
-      const e2eeHtml = msg.encrypted ? `<span class="e2ee-badge">🔒 E2EE</span>` : '';
-
-      let contentHtml = escapeHtml(msg.content || '');
-      if (msg.edited) contentHtml += ' <span style="font-size:11px; color:var(--text-muted)">(ред.)</span>';
-
-      if ((msg.content || '').startsWith('[FILE:')) {
-        const closeIdx = msg.content.indexOf(']');
-        if (closeIdx > 6) {
-          const meta = msg.content.substring(6, closeIdx).split(':');
-          const hash = meta[0];
-          const fname = meta[1] || 'file';
-          const fsize = meta[2] || '0';
-          const mime = meta[3] || 'application/octet-stream';
-          const isImg = mime.startsWith('image/');
-
-          if (ws && ws.readyState === WebSocket.OPEN && !blobCache[hash]) {
-            ws.send(JSON.stringify({ action: 'get_blob', hash: hash }));
-          }
-          const cachedB64 = blobCache[hash];
-          const imgDisplay = (isImg && cachedB64) ? `style="display:block"` : `style="display:none"`;
-          const imgSrc = (isImg && cachedB64) ? `src="data:${mime};base64,${cachedB64}"` : '';
-
-          contentHtml = `
-            <div class="attachment-card" onclick="downloadBlobAttachment('${hash}', '${escapeHtml(fname)}', '${mime}')">
-              <span>📄 <strong>${escapeHtml(fname)}</strong> (${Math.round(fsize/1024)} KB) — Скачать</span>
-            </div>
-            ${isImg ? `<div class="attachment-preview"><img id="img-${hash}" ${imgSrc} ${imgDisplay}/></div>` : ''}
-          `;
-        }
-      }
-
-      const sig = msg.signature || '';
-      const isMine = (msg.author === myNick);
-
-      group.innerHTML = `
-        <div class="msg-avatar" style="background:${color}">${initial}</div>
-        <div class="msg-body">
-          <div class="msg-meta">
-            <span class="msg-author">${escapeHtml(msg.author || 'Anon')}</span>
-            ${verifiedHtml}
-            ${e2eeHtml}
-            <span class="msg-time">${msg.time || 'только что'}</span>
-          </div>
-          <div class="msg-content" id="content-${sig}">${contentHtml}</div>
-          <div class="reaction-bar" id="reacts-${sig}">${escapeHtml(msg.reactions || '')}</div>
-          <div class="msg-actions">
-            <button class="action-btn" onclick="sendReaction('${sig}', '👍')">👍</button>
-            <button class="action-btn" onclick="sendReaction('${sig}', '❤️')">❤️</button>
-            <button class="action-btn" onclick="sendReaction('${sig}', '🔥')">🔥</button>
-            <button class="action-btn" onclick="sendReaction('${sig}', '🚀')">🚀</button>
-            ${isMine ? `<button class="action-btn" onclick="promptEditMessage('${sig}')">✏️</button>` : ''}
-            ${isMine ? `<button class="action-btn" onclick="deleteMessage('${sig}')">🗑️</button>` : ''}
-          </div>
-        </div>
-      `;
-      feed.appendChild(group);
-      feed.scrollTop = feed.scrollHeight;
-    }
-
-    function escapeHtml(text) {
-      const d = document.createElement('div');
-      d.innerText = text || '';
-      return d.innerHTML;
-    }
-
-    function submitCurrentMessage() {
-      const inputEl = document.getElementById('msg-input');
-      if (!inputEl || inputEl.value.trim() === '') return;
-      const text = inputEl.value.trim();
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        if (currentChannel.startsWith('dm:') && currentDmPeerPk) {
-          ws.send(JSON.stringify({
-            action: 'send_dm',
-            target_pk: currentDmPeerPk,
-            text: text
-          }));
-        } else {
-          ws.send(JSON.stringify({
-            action: 'send_message',
-            space_id: currentSpaceId,
-            channel: currentChannel,
-            text: text
-          }));
-        }
-        inputEl.value = '';
-      }
-    }
-
-    document.getElementById('msg-input').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        submitCurrentMessage();
-      }
-    });
-
-    function sendReaction(targetSig, emoji) {
-      if (!targetSig || !ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({
-        action: 'send_reaction',
-        target_sig: targetSig,
-        emoji: emoji
-      }));
-    }
-
-    function promptEditMessage(targetSig) {
-      if (!targetSig) return;
-      const el = document.getElementById('content-' + targetSig);
-      const oldText = el ? el.innerText.replace(' (ред.)', '') : '';
-      openInputModal('edit_message', targetSig, oldText);
-    }
-
-    function deleteMessage(targetSig) {
-      if (!targetSig || !ws || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({
-        action: 'delete_message',
-        target_sig: targetSig
-      }));
-      showToast('Сообщение удалено');
-    }
-
-    let audioCtx = null;
-    let micStream = null;
-
-    async function toggleVoiceConnect(channel) {
-      if (voiceConnected) {
-        if (micStream) {
-          micStream.getTracks().forEach(t => t.stop());
-          micStream = null;
-        }
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ action: 'leave_voice' }));
-        }
-      } else {
-        try {
-          if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-            micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
-            const source = audioCtx.createMediaStreamSource(micStream);
-            const processor = audioCtx.createScriptProcessor(1024, 1, 1);
-            source.connect(processor);
-            processor.connect(audioCtx.destination);
-            processor.onaudioprocess = (e) => {
-              if (!voiceConnected || !ws || ws.readyState !== WebSocket.OPEN) return;
-              const inputData = e.inputBuffer.getChannelData(0);
-              const pcm16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) {
-                pcm16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
-              }
-              const uint8 = new Uint8Array(pcm16.buffer);
-              let binary = '';
-              for (let i = 0; i < uint8.byteLength; i++) binary += String.fromCharCode(uint8[i]);
-              const b64 = btoa(binary);
-              ws.send(JSON.stringify({
-                action: 'voice_data',
-                channel: channel,
-                data_base64: b64
-              }));
-            };
-          }
-        } catch (err) {
-          console.warn('Voice listen-only mode:', err);
-        }
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ action: 'join_voice', channel: channel }));
-        }
-      }
-      toggleMobileDrawer(false);
-    }
-
-    function playVoiceChunk(b64) {
-      if (!voiceConnected || !b64) return;
-      try {
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
-        const binary = atob(b64);
-        const len = binary.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-        const pcm16 = new Int16Array(bytes.buffer);
-        const floatData = new Float32Array(pcm16.length);
-        for (let i = 0; i < pcm16.length; i++) floatData[i] = pcm16[i] / 32768.0;
-
-        const buffer = audioCtx.createBuffer(1, floatData.length, 48000);
-        buffer.getChannelData(0).set(floatData);
-        const srcNode = audioCtx.createBufferSource();
-        srcNode.buffer = buffer;
-        srcNode.connect(audioCtx.destination);
-        srcNode.start();
-      } catch (e) {}
-    }
-
+  /* ======================== INITIALIZATION & GLOBAL EXPORTS ======================== */
+  function initWexApp() {
+    loadContacts();
+    bindEvents();
+    selectTab('dms');
+    renderContactList();
     connectWS();
-  </script>
+  }
+
+  window.selectTab = selectTab;
+  window.switchModeTab = switchModeTab;
+  window.openDmConversation = openDmConversation;
+  window.openSwarmChannel = openSwarmChannel;
+  window.closeActiveChat = closeActiveChat;
+  window.closeMobileConversation = closeMobileConversation;
+  window.addContactOrConnect = addContactOrConnect;
+  window.submitConnectPeer = submitConnectPeer;
+  window.submitCurrentMessage = submitCurrentMessage;
+  window.switchSpace = switchSpace;
+  window.switchChannel = switchChannel;
+  window.startDirectMessage = startDirectMessage;
+  window.copyTextWithToast = copyTextWithToast;
+  window.pasteIntoInput = pasteIntoInput;
+  window.shareInviteNative = shareInviteNative;
+  window.showToast = showToast;
+  window.closeModals = closeModals;
+  window.openInviteModal = openInviteModal;
+  window.openConnectModal = openConnectModal;
+  window.openProfileModal = openProfileModal;
+  window.openInputModal = openInputModal;
+  window.submitInputModal = submitInputModal;
+  window.saveProfileNick = saveProfileNick;
+  window.toggleSeedReveal = toggleSeedReveal;
+  window.exportMasterSeed = exportMasterSeed;
+  window.copyMasterSeed = copyMasterSeed;
+  window.importMasterSeed = importMasterSeed;
+  window.submitImportSeed = submitImportSeed;
+  window.triggerLanBeacon = triggerLanBeacon;
+  window.triggerLanDiscovery = triggerLanDiscovery;
+  window.triggerStunProbe = triggerStunProbe;
+  window.triggerPullOffline = triggerPullOffline;
+  window.handleFileUpload = handleFileUpload;
+  window.downloadBlobAttachment = downloadBlobAttachment;
+  window.sendReaction = sendReaction;
+  window.promptEditMessage = promptEditMessage;
+  window.deleteMessage = deleteMessage;
+  window.toggleVoiceConnect = toggleVoiceConnect;
+  window.toggleMobileDrawer = toggleMobileDrawer;
+  window.renderKeyMatrixCanvas = renderKeyMatrixCanvas;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initWexApp);
+  } else {
+    initWexApp();
+  }
+})();
+
+</script>
 </body>
 </html>

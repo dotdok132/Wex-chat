@@ -13,6 +13,13 @@
 #define WEX_MAX_CLIENTS 16
 #define WEX_MAX_HISTORY 256
 
+#ifndef WEX_ENC_CHANNEL_E2EE
+#define WEX_ENC_CHANNEL_E2EE 0x01
+#endif
+#ifndef WEX_ENC_DM_E2EE
+#define WEX_ENC_DM_E2EE      0x02
+#endif
+
 typedef struct {
     int ws_server_fd;
     int ws_port;

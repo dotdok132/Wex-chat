@@ -1,0 +1,1681 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0b0d">
+  <title>WEX // PROTOCOL — Sovereign Cryptographic Messenger</title>
+  <style>
+    :root {
+      /* Obsidian Carbon Palette */
+      --bg-void: #0a0b0d;
+      --bg-surface: #111317;
+      --bg-elevated: #181b20;
+      --bg-interactive: #1e2229;
+      --bg-active: #252a34;
+
+      /* Structural Hairlines */
+      --line: #22262e;
+      --line-strong: #2f3542;
+
+      /* Typography */
+      --text-primary: #eceef2;
+      --text-secondary: #b4bac6;
+      --text-muted: #7d8594;
+      --text-dim: #525866;
+
+      /* Cryptographic Telemetry Signals */
+      --sig-emerald: #10b981;
+      --sig-emerald-dim: rgba(16, 185, 129, 0.12);
+      --sig-emerald-border: rgba(16, 185, 129, 0.32);
+
+      --sig-amber: #f59e0b;
+      --sig-amber-dim: rgba(245, 158, 11, 0.12);
+      --sig-amber-border: rgba(245, 158, 11, 0.32);
+
+      --sig-crimson: #ef4444;
+      --sig-crimson-dim: rgba(239, 68, 68, 0.12);
+      --sig-crimson-border: rgba(239, 68, 68, 0.32);
+
+      /* Fonts */
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+      /* Safe Areas & Dimensions */
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+      --master-width: 320px;
+      --header-height: 54px;
+      --tabbar-height: 56px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      background-color: var(--bg-void);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 1.45;
+      overflow: hidden;
+      overscroll-behavior: none;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--line-strong);
+      border-radius: 2px;
+    }
+
+    button, input, textarea {
+      font-family: inherit;
+      color: inherit;
+    }
+
+    /* =========================================================================
+       ROOT APPLICATION SHELL (2-Column Split >= 768px, Master-Detail Stack < 768px)
+       ========================================================================= */
+    #app-root {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      background: var(--bg-void);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* LEFT / MASTER PANE: Navigation, Contacts, Swarms, Telemetry, Key Identity */
+    #master-pane {
+      width: var(--master-width);
+      height: 100%;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      z-index: 20;
+      position: relative;
+    }
+
+    /* RIGHT / DETAIL PANE: Active E2EE DM or Swarm Conversation */
+    #detail-pane {
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+      background: var(--bg-void);
+      display: flex;
+      flex-direction: column;
+      z-index: 30;
+      position: relative;
+    }
+
+    /* =========================================================================
+       MASTER PANE TOP BAR (Protocol Identity & Live Node Pulse)
+       ========================================================================= */
+    .protocol-topbar {
+      height: var(--header-height);
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg-void);
+      flex-shrink: 0;
+    }
+
+    .protocol-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .node-pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--sig-emerald);
+      box-shadow: 0 0 8px var(--sig-emerald);
+      flex-shrink: 0;
+    }
+    .node-pulse-dot.amber {
+      background: var(--sig-amber);
+      box-shadow: 0 0 8px var(--sig-amber);
+    }
+    .node-pulse-dot.crimson {
+      background: var(--sig-crimson);
+      box-shadow: 0 0 8px var(--sig-crimson);
+    }
+
+    .brand-titles {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .brand-title {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .brand-subtitle {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .topbar-identity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      max-width: 130px;
+    }
+    .topbar-identity-chip:hover {
+      border-color: var(--line-strong);
+      background: var(--bg-interactive);
+    }
+    .chip-avatar {
+      width: 18px;
+      height: 18px;
+      border-radius: 3px;
+      background: var(--sig-emerald-dim);
+      border: 1px solid var(--sig-emerald-border);
+      color: var(--sig-emerald);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .chip-nick {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* =========================================================================
+       MODE SWITCHER (Top Segmented Control on Desktop, Bottom Tab Bar on Mobile)
+       ========================================================================= */
+    #mode-nav-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      background: var(--bg-void);
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+
+    .mode-tab-btn {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 10px 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      cursor: pointer;
+      color: var(--text-muted);
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+      position: relative;
+      user-select: none;
+    }
+    .mode-tab-btn:hover {
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .mode-tab-btn.active {
+      color: var(--sig-emerald);
+      border-bottom-color: var(--sig-emerald);
+      background: var(--sig-emerald-dim);
+    }
+    .mode-tab-code {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .mode-tab-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .mode-tab-badge {
+      position: absolute;
+      top: 5px;
+      right: 8px;
+      min-width: 15px;
+      height: 15px;
+      padding: 0 4px;
+      border-radius: 3px;
+      background: var(--sig-emerald);
+      color: var(--bg-void);
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .mode-tab-badge.visible {
+      display: inline-flex;
+    }
+
+    /* =========================================================================
+       PERSISTENT VOICE STATUS BANNER (When UDP Voice Relay is Connected)
+       ========================================================================= */
+    .voice-status-bar {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--sig-emerald-dim);
+      border-bottom: 1px solid var(--sig-emerald-border);
+      flex-shrink: 0;
+    }
+    .voice-status-bar.active {
+      display: flex;
+    }
+    .voice-conn-info {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 0;
+    }
+    .voice-conn-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--sig-emerald);
+      letter-spacing: 0.04em;
+    }
+    .voice-conn-sub {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-secondary);
+    }
+
+    /* =========================================================================
+       TAB PANELS CONTAINER
+       ========================================================================= */
+    #master-panels {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tab-panel {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 12px;
+      gap: 14px;
+    }
+    .tab-panel.active {
+      display: flex;
+    }
+
+    /* Shared UI Primitives inside Panels */
+    .panel-action-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-primary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: background 0.14s, border-color 0.14s, color 0.14s;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .btn:hover, .btn:active {
+      background: var(--bg-interactive);
+      border-color: var(--text-muted);
+    }
+    .btn.primary {
+      background: var(--sig-emerald-dim);
+      border-color: var(--sig-emerald-border);
+      color: var(--sig-emerald);
+    }
+    .btn.primary:hover, .btn.primary:active {
+      background: var(--sig-emerald);
+      border-color: var(--sig-emerald);
+      color: var(--bg-void);
+    }
+    .btn.amber {
+      background: var(--sig-amber-dim);
+      border-color: var(--sig-amber-border);
+      color: var(--sig-amber);
+    }
+    .btn.danger {
+      background: var(--sig-crimson-dim);
+      border-color: var(--sig-crimson-border);
+      color: var(--sig-crimson);
+    }
+    .btn.full {
+      width: 100%;
+    }
+    .btn.mono {
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .section-block {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 2px 2px 4px 2px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section-title {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .section-action-btn {
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      cursor: pointer;
+    }
+    .section-action-btn:hover {
+      border-color: var(--sig-emerald-border);
+      color: var(--sig-emerald);
+    }
+
+    .item-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .empty-list-hint {
+      padding: 12px 10px;
+      background: var(--bg-void);
+      border: 1px dashed var(--line);
+      border-radius: 4px;
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* =========================================================================
+       TAB 1: DM / CONTACTS (Primary Default View)
+       ========================================================================= */
+    .contact-card, .peer-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 9px 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+      user-select: none;
+    }
+    .contact-card:hover, .peer-item:hover {
+      background: var(--bg-elevated);
+      border-color: var(--line-strong);
+    }
+    .contact-card.active, .channel-item.active {
+      background: var(--bg-elevated);
+      border-color: var(--sig-emerald);
+      box-shadow: inset 2px 0 0 var(--sig-emerald);
+    }
+
+    .contact-left, .peer-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .contact-monogram {
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .peer-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--sig-emerald);
+      flex-shrink: 0;
+    }
+    .peer-dot.offline {
+      background: var(--text-dim);
+    }
+
+    .contact-meta {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .contact-name, .peer-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .contact-pk-preview {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .crypto-tag {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 5px;
+      border-radius: 3px;
+      background: var(--sig-emerald-dim);
+      border: 1px solid var(--sig-emerald-border);
+      color: var(--sig-emerald);
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+
+    /* =========================================================================
+       TAB 2: SWARMS (Decentralized Group Spaces & Channels)
+       ========================================================================= */
+    .swarm-switcher-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .swarm-pill {
+      padding: 6px 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.12s;
+    }
+    .swarm-pill:hover {
+      border-color: var(--line-strong);
+      color: var(--text-primary);
+    }
+    .swarm-pill.active {
+      background: var(--sig-emerald-dim);
+      border-color: var(--sig-emerald);
+      color: var(--sig-emerald);
+    }
+    .swarm-pill.add-btn {
+      border-style: dashed;
+      color: var(--text-muted);
+    }
+
+    .swarm-header-card {
+      padding: 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .swarm-active-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .swarm-active-id {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .channel-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+      color: var(--text-secondary);
+      font-size: 13px;
+      transition: background 0.12s, border-color 0.12s;
+      user-select: none;
+    }
+    .channel-item:hover {
+      background: var(--bg-elevated);
+      color: var(--text-primary);
+    }
+    .channel-item.text-ch::before {
+      content: '//';
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-right: 8px;
+    }
+    .channel-item.active {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .voice-channel {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--text-secondary);
+      transition: all 0.12s;
+    }
+    .voice-channel:hover {
+      background: var(--bg-elevated);
+      border-color: var(--line-strong);
+    }
+    .voice-channel.connected {
+      background: var(--sig-emerald-dim);
+      border-color: var(--sig-emerald);
+      color: var(--sig-emerald);
+      font-weight: 600;
+    }
+
+    /* =========================================================================
+       TAB 3: NETWORK / P2P NODE TELEMETRY
+       ========================================================================= */
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .telemetry-card {
+      padding: 10px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .telemetry-card.full {
+      grid-column: 1 / -1;
+    }
+    .telemetry-label {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .telemetry-value {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      word-break: break-all;
+    }
+    .telemetry-value.emerald {
+      color: var(--sig-emerald);
+    }
+    .telemetry-value.amber {
+      color: var(--sig-amber);
+    }
+
+    /* =========================================================================
+       TAB 4: KEY / CRYPTOGRAPHIC IDENTITY & SEED VAULT
+       ========================================================================= */
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .field-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .text-input {
+      width: 100%;
+      background: var(--bg-void);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 9px 10px;
+      color: var(--text-primary);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.14s;
+    }
+    .text-input.mono {
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+    .text-input:focus {
+      border-color: var(--sig-emerald);
+    }
+
+    .code-box {
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 9px 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+      word-break: break-all;
+      line-height: 1.45;
+      user-select: all;
+    }
+    .code-box.masked {
+      filter: blur(4px);
+      user-select: none;
+      cursor: pointer;
+      transition: filter 0.18s;
+    }
+    .code-box.masked.revealed {
+      filter: none;
+      user-select: all;
+    }
+
+    .qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      gap: 8px;
+    }
+    #profile-qr-canvas {
+      width: 168px;
+      height: 168px;
+      background: #ffffff;
+      border-radius: 4px;
+      padding: 6px;
+      display: block;
+    }
+    .qr-caption {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    /* =========================================================================
+       DETAIL PANE: CONVERSATION HEADER, FEED & COMPOSER
+       ========================================================================= */
+    .chat-header {
+      height: var(--header-height);
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--bg-surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .chat-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    /* Back button: Hidden on >= 768px, Prominent on < 768px */
+    #btn-back-to-list {
+      display: none;
+      align-items: center;
+      gap: 5px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    #btn-back-to-list:active {
+      background: var(--bg-interactive);
+      border-color: var(--sig-emerald);
+    }
+
+    .chat-title-stack {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .chat-title-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    #channel-prefix {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--sig-emerald-dim);
+      border: 1px solid var(--sig-emerald-border);
+      color: var(--sig-emerald);
+      flex-shrink: 0;
+    }
+
+    #active-channel-name {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #active-channel-topic {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    /* Messages Stream */
+    .messages-feed {
+      flex: 1;
+      padding: 16px 14px;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: var(--bg-void);
+    }
+
+    .empty-state {
+      margin: auto;
+      max-width: 380px;
+      padding: 24px 20px;
+      background: var(--bg-surface);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .empty-state-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--sig-emerald);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .empty-state h3 {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .empty-state p {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* Individual Message Packet Row */
+    .msg-group {
+      display: flex;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--bg-surface);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      transition: border-color 0.12s;
+      position: relative;
+    }
+    .msg-group:hover, .msg-group.selected {
+      border-color: var(--line-strong);
+    }
+    .msg-group.mine {
+      border-left: 2px solid var(--sig-emerald);
+    }
+
+    .msg-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 4px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .msg-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .msg-meta {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .msg-author {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .verified-badge {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 2px;
+      background: var(--sig-emerald-dim);
+      border: 1px solid var(--sig-emerald-border);
+      color: var(--sig-emerald);
+    }
+
+    .e2ee-badge {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 2px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--line-strong);
+      color: var(--text-secondary);
+    }
+
+    .msg-time {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    .msg-content {
+      font-size: 14px;
+      line-height: 1.48;
+      color: var(--text-primary);
+      word-break: break-word;
+    }
+
+    .attachment-card {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-void);
+      padding: 7px 11px;
+      border-radius: 4px;
+      margin-top: 6px;
+      border: 1px solid var(--line-strong);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-primary);
+      cursor: pointer;
+      max-width: 100%;
+    }
+    .attachment-card:hover {
+      border-color: var(--sig-emerald);
+    }
+    .attachment-preview img {
+      max-width: min(300px, 100%);
+      max-height: 220px;
+      border-radius: 4px;
+      margin-top: 6px;
+      display: block;
+      border: 1px solid var(--line);
+    }
+
+    .reaction-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--sig-emerald);
+    }
+
+    .msg-actions {
+      display: none;
+      gap: 4px;
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid var(--line);
+    }
+    .msg-group:hover .msg-actions,
+    .msg-group.selected .msg-actions {
+      display: flex;
+    }
+    .action-btn {
+      background: var(--bg-void);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 3px 7px;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+    .action-btn:hover {
+      border-color: var(--sig-emerald);
+      color: var(--text-primary);
+    }
+
+    /* Message Composer Bar */
+    .input-box {
+      padding: 10px 14px calc(10px + var(--safe-bottom)) 14px;
+      background: var(--bg-surface);
+      border-top: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+
+    .input-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-void);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 5px 6px 5px 10px;
+      transition: border-color 0.14s;
+    }
+    .input-wrapper:focus-within {
+      border-color: var(--sig-emerald);
+    }
+
+    .attach-btn {
+      background: var(--bg-elevated);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .attach-btn:hover {
+      border-color: var(--text-muted);
+      color: var(--text-primary);
+    }
+
+    #msg-input {
+      flex: 1;
+      min-width: 0;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-primary);
+      font-size: 14px;
+      padding: 6px 0;
+    }
+    #msg-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .send-btn {
+      background: var(--sig-emerald);
+      border: 1px solid var(--sig-emerald);
+      border-radius: 3px;
+      color: var(--bg-void);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 0 12px;
+      height: 32px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+    .send-btn:active {
+      opacity: 0.85;
+    }
+
+    /* =========================================================================
+       MODALS & TOAST NOTIFICATION
+       ========================================================================= */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(5, 6, 8, 0.82);
+      z-index: 400;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal-card {
+      width: 100%;
+      max-width: 420px;
+      max-height: 90dvh;
+      overflow-y: auto;
+      background: var(--bg-surface);
+      border: 1px solid var(--line-strong);
+      border-radius: 4px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.75);
+    }
+
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .modal-title {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-primary);
+    }
+
+    .modal-close {
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      width: 26px;
+      height: 26px;
+      cursor: pointer;
+    }
+    .modal-close:hover {
+      color: var(--text-primary);
+      border-color: var(--line-strong);
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .modal-actions .btn {
+      flex: 1;
+      min-height: 38px;
+    }
+
+    #toast {
+      position: fixed;
+      top: calc(12px + var(--safe-top));
+      left: 50%;
+      transform: translateX(-50%) translateY(-90px);
+      background: var(--bg-elevated);
+      border: 1px solid var(--sig-emerald);
+      color: var(--sig-emerald);
+      padding: 8px 14px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65);
+      z-index: 600;
+      transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+      pointer-events: none;
+    }
+    #toast.show {
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* =========================================================================
+       NATIVE PHONE MASTER-DETAIL STACK (< 768px)
+       ========================================================================= */
+    @media (max-width: 767px) {
+      #master-pane {
+        width: 100%;
+        height: 100%;
+        border-right: none;
+        /* Reorder Mode Switcher to the bottom of the screen like native mobile apps */
+      }
+
+      #mode-nav-bar {
+        order: 10;
+        border-bottom: none;
+        border-top: 1px solid var(--line);
+        padding-bottom: var(--safe-bottom);
+        min-height: calc(var(--tabbar-height) + var(--safe-bottom));
+      }
+
+      .mode-tab-btn {
+        border-bottom: none;
+        border-top: 2px solid transparent;
+        padding: 8px 4px;
+      }
+      .mode-tab-btn.active {
+        border-bottom-color: transparent;
+        border-top-color: var(--sig-emerald);
+      }
+
+      /* Detail Pane is fullscreen overlay that slides in when body.chat-active is set */
+      #detail-pane {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        transform: translateX(100%);
+        transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+        pointer-events: none;
+      }
+
+      body.chat-active #detail-pane {
+        transform: translateX(0);
+        pointer-events: auto;
+      }
+
+      #btn-back-to-list {
+        display: inline-flex;
+      }
+
+      #active-channel-topic {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Cryptographic Telemetry Toast -->
+  <div id="toast" role="status" aria-live="polite">СКОПИРОВАНО В БУФЕР</div>
+
+  <div id="app-root">
+    <!-- =====================================================================
+         LEFT / MASTER PANE: Navigation, Contacts (DM), Swarms, Network, Key
+         ===================================================================== -->
+    <aside id="master-pane">
+      <!-- Protocol Header -->
+      <header class="protocol-topbar">
+        <div class="protocol-brand">
+          <span class="node-pulse-dot" id="node-pulse-indicator"></span>
+          <div class="brand-titles">
+            <span class="brand-title">WEX // PROTOCOL</span>
+            <span class="brand-subtitle" id="my-node-status">INIT DAEMON...</span>
+          </div>
+        </div>
+        <button class="topbar-identity-chip" id="btn-quick-profile" onclick="switchModeTab('key')" title="Ключ и профиль">
+          <span class="chip-avatar" id="my-avatar">W</span>
+          <span class="chip-nick" id="my-nickname">Node</span>
+        </button>
+      </header>
+
+      <!-- Mode Switcher (Docked Top on Desktop >=768px, Docked Bottom on Mobile <768px) -->
+      <nav id="mode-nav-bar" aria-label="Режимы протокола">
+        <button class="mode-tab-btn active" id="tab-btn-dms" data-tab="dms" onclick="switchModeTab('dms')">
+          <span class="mode-tab-code">[01]</span>
+          <span class="mode-tab-label">ЛС</span>
+          <span class="mode-tab-badge" id="badge-dms">0</span>
+        </button>
+        <button class="mode-tab-btn" id="tab-btn-swarms" data-tab="swarms" onclick="switchModeTab('swarms')">
+          <span class="mode-tab-code">[02]</span>
+          <span class="mode-tab-label">Свармы</span>
+          <span class="mode-tab-badge" id="badge-swarms">0</span>
+        </button>
+        <button class="mode-tab-btn" id="tab-btn-net" data-tab="net" onclick="switchModeTab('net')">
+          <span class="mode-tab-code">[03]</span>
+          <span class="mode-tab-label">Сеть</span>
+        </button>
+        <button class="mode-tab-btn" id="tab-btn-key" data-tab="key" onclick="switchModeTab('key')">
+          <span class="mode-tab-code">[04]</span>
+          <span class="mode-tab-label">Ключ</span>
+        </button>
+      </nav>
+
+      <!-- Persistent UDP Voice Bar (visible across all tabs when in voice) -->
+      <div class="voice-status-bar" id="voice-bar">
+        <div class="voice-conn-info">
+          <span class="voice-conn-title">● UDP VOICE RELAY АКТИВЕН</span>
+          <span class="voice-conn-sub" id="voice-sub">voice-lounge // 48kHz PCM</span>
+        </div>
+        <button class="btn danger mono" onclick="toggleVoiceConnect('voice-lounge')">ОТКЛ</button>
+      </div>
+
+      <!-- Master Panels -->
+      <div id="master-panels">
+        <!-- =================================================================
+             PANEL 1 (DEFAULT): ЛС / КОНТАКТЫ (1-on-1 E2EE Direct Messages)
+             ================================================================= -->
+        <section class="tab-panel active" id="panel-dms">
+          <div class="panel-action-row">
+            <button class="btn primary full mono" id="btn-add-contact" onclick="openConnectModal()">+ ДОБАВИТЬ КОНТАКТ / КЛЮЧ</button>
+            <button class="btn mono" id="btn-share-my-key" onclick="openInviteModal()" title="Мой инвайт и ключ">QR / КЛЮЧ</button>
+          </div>
+
+          <!-- Active E2EE Direct Message Threads -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ЛИЧНЫЕ ДИАЛОГИ (X25519 + CHACHA20)</span>
+            </div>
+            <div class="item-list" id="dm-container">
+              <div class="empty-list-hint">
+                Нет активных диалогов. Выберите пира в локальной сети ниже или добавьте контакт по его Public Key / инвайт-ссылке.
+              </div>
+            </div>
+          </div>
+
+          <!-- Discovered LAN & DHT Peers -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ОБНАРУЖЕННЫЕ УЗЛЫ (LAN / DHT)</span>
+              <button class="section-action-btn" onclick="triggerLanDiscovery()" title="Обновить поиск пиров">SCAN</button>
+            </div>
+            <div class="item-list" id="peer-container">
+              <div class="empty-list-hint">Радиомаяк LAN (UDP :9009) и таблица Kademlia DHT ожидают отклика узлов...</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             PANEL 2: СВАРМЫ (Decentralized Group Spaces & Channels)
+             ================================================================= -->
+        <section class="tab-panel" id="panel-swarms">
+          <!-- Swarm Selector Strip -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ВАШИ СВАРМЫ (СООБЩЕСТВА)</span>
+              <button class="section-action-btn" onclick="openInputModal('create_space')">+ НОВЫЙ</button>
+            </div>
+            <div class="swarm-switcher-strip" id="guilds-bar">
+              <button class="swarm-pill add-btn" onclick="openInputModal('create_space')">+</button>
+            </div>
+          </div>
+
+          <!-- Active Swarm Header & Invite Trigger -->
+          <div class="swarm-header-card">
+            <div>
+              <div class="swarm-active-title" id="server-title">Нет выбранной группы</div>
+              <div class="swarm-active-id" id="active-swarm-id-label">P2P MESH SWARM</div>
+            </div>
+            <button class="btn primary mono" onclick="openInviteModal()">ИНВАЙТ</button>
+          </div>
+
+          <!-- Swarm Text Channels -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">КАНАЛЫ СВАРМА</span>
+              <button class="section-action-btn" onclick="openInputModal('create_channel')">+ КАНАЛ</button>
+            </div>
+            <div class="item-list" id="channel-container">
+              <div class="empty-list-hint">Создайте группу (+) или подключитесь по инвайту</div>
+            </div>
+          </div>
+
+          <!-- Swarm Voice Relay -->
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ГОЛОСОВОЙ КАНАЛ (UDP P2P)</span>
+            </div>
+            <div class="item-list">
+              <div class="voice-channel" id="voice-btn" onclick="toggleVoiceConnect('voice-lounge')">
+                <span class="mono" style="font-family:var(--font-mono); font-size:12px;">[AUDIO] voice-lounge</span>
+                <span class="crypto-tag" id="voice-badge">ВОЙТИ</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             PANEL 3: СЕТЬ / УЗЕЛ (Live P2P Telemetry, STUN, DHT, Quas)
+             ================================================================= -->
+        <section class="tab-panel" id="panel-net">
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ТЕЛЕМЕТРИЯ ТРАНСПОРТА (WEX ENGINE)</span>
+            </div>
+            <div class="telemetry-grid">
+              <div class="telemetry-card">
+                <span class="telemetry-label">СТАТУС ДЕМОНА</span>
+                <span class="telemetry-value emerald" id="net-daemon-state">ONLINE</span>
+              </div>
+              <div class="telemetry-card">
+                <span class="telemetry-label">ЛОКАЛЬНЫЙ ПОРТ</span>
+                <span class="telemetry-value" id="net-udp-port">UDP :9001</span>
+              </div>
+              <div class="telemetry-card full">
+                <span class="telemetry-label">ВНЕШНИЙ WAN ENDPOINT (STUN / NAT)</span>
+                <span class="telemetry-value amber" id="net-wan-endpoint">Определение через STUN...</span>
+              </div>
+              <div class="telemetry-card">
+                <span class="telemetry-label">УЗЛОВ KADEMLIA DHT</span>
+                <span class="telemetry-value" id="net-dht-count">0</span>
+              </div>
+              <div class="telemetry-card">
+                <span class="telemetry-label">QUAS CACHED PACKETS</span>
+                <span class="telemetry-value" id="net-quas-count">ACTIVE</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-action-row">
+            <button class="btn primary full mono" id="btn-lan-beacon" onclick="triggerLanDiscovery()">LAN BEACON</button>
+            <button class="btn full mono" id="btn-stun-probe" onclick="triggerStunProbe()">STUN PROBE</button>
+          </div>
+
+          <div class="section-block">
+            <div class="section-header">
+              <span class="section-title">ТАБЛИЦА МАРШРУТИЗАЦИИ ПИРОВ</span>
+              <button class="section-action-btn" onclick="openConnectModal()">+ УЗЕЛ</button>
+            </div>
+            <div class="code-box" id="profile-diag-box">Синхронизация с локальным демоном...</div>
+          </div>
+        </section>
+
+        <!-- =================================================================
+             PANEL 4: КЛЮЧ / ПРОФИЛЬ (Ed25519 Identity, QR, Master Seed)
+             ================================================================= -->
+        <section class="tab-panel" id="panel-key">
+          <!-- Nickname Setting -->
+          <div class="field-group">
+            <label class="field-label" for="profile-nick-input">ПУБЛИЧНЫЙ ПСЕВДОНИМ (БЕЗ KYC)</label>
+            <div class="panel-action-row">
+              <input type="text" class="text-input" id="profile-nick-input" placeholder="Ваш псевдоним">
+              <button class="btn primary mono" id="btn-save-nick" onclick="saveProfileNick()">СОХРАНИТЬ</button>
+            </div>
+          </div>
+
+          <!-- Ed25519 Public Key & QR -->
+          <div class="field-group">
+            <label class="field-label">ВАШ ED25519 PUBLIC KEY (ZERO-IP IDENTITY)</label>
+            <div class="code-box" id="key-pubkey-display">Генерация ключей Exort...</div>
+            <div class="panel-action-row">
+              <button class="btn primary full mono" id="btn-copy-pubkey" onclick="copyTextWithToast(myPublicKey, 'PUBLIC KEY СКОПИРОВАН')">КОПИРОВАТЬ PUBLIC KEY</button>
+              <button class="btn full mono" id="btn-share-uri" onclick="shareInviteNative()">ПОДЕЛИТЬСЯ URI</button>
+            </div>
+          </div>
+
+          <!-- QR Code Canvas -->
+          <div class="qr-container">
+            <canvas id="profile-qr-canvas" width="168" height="168"></canvas>
+            <span class="qr-caption">НАВЕДИТЕ КАМЕРУ ДЛЯ ПРЯМОГО СОЕДИНЕНИЯ (WEX://JOIN)</span>
+          </div>
+
+          <!-- Master Seed Backup / Restore -->
+          <div class="field-group">
+            <div class="section-header">
+              <span class="field-label">ПРИВАТНЫЙ MASTER SEED (HEX 64)</span>
+              <button class="section-action-btn" id="btn-toggle-seed" onclick="toggleSeedReveal()">ПОКАЗАТЬ / СКРЫТЬ</button>
+            </div>
+            <div class="code-box masked" id="seed-hex-box" onclick="toggleSeedReveal()" title="Нажмите, чтобы показать или скрыть">
+              0000000000000000000000000000000000000000000000000000000000000000
+            </div>
+            <div class="panel-action-row">
+              <button class="btn full mono" id="btn-copy-seed" onclick="copyMasterSeed()">ЭКСПОРТ SEED</button>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label class="field-label" for="seed-import-input">ИМПОРТ / ВОССТАНОВЛЕНИЕ КЛЮЧА (HEX SEED)</label>
+            <div class="panel-action-row">
+              <input type="text" class="text-input mono" id="seed-import-input" placeholder="64-символьный hex-ключ...">
+              <button class="btn amber mono" id="btn-import-seed" onclick="submitImportSeed()">ИМПОРТ</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <!-- =====================================================================
+         RIGHT / DETAIL PANE: Active Conversation Stream
+         ===================================================================== -->
+    <main id="detail-pane">
+      <header class="chat-header" id="chat-header">
+        <div class="chat-header-left">
+          <button id="btn-back-to-list" onclick="closeMobileConversation()" title="Назад к списку">
+            ← Назад
+          </button>
+          <div class="chat-title-stack">
+            <div class="chat-title-row">
+              <span id="channel-prefix">E2EE</span>
+              <span id="active-channel-name">Личные сообщения</span>
+            </div>
+            <span id="active-channel-topic">X25519 + ChaCha20-Poly1305</span>
+          </div>
+        </div>
+        <div class="chat-header-actions">
+          <button class="btn mono" onclick="openConnectModal()">+ КОНТАКТ</button>
+          <button class="btn primary mono" onclick="openInviteModal()">ИНВАЙТ</button>
+        </div>
+      </header>
+
+      <div class="messages-feed" id="messages">
+        <div class="empty-state">
+          <span class="empty-state-tag">WEX // SOVEREIGN E2EE</span>
+          <h3>Личные сообщения</h3>
+          <p>Выберите контакт слева или добавьте собеседника по Public Key / инвайт-ссылке для начала прямого зашифрованного диалога.</p>
+        </div>
+      </div>
+
+      <div class="input-box">
+        <div class="input-wrapper">
+          <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(event)">
+          <button class="attach-btn" id="btn-attach-file" title="Прикрепить файл (P2P Chunked Blob)" onclick="document.getElementById('file-input').click()">+</button>
+          <input type="text" id="msg-input" placeholder="Зашифрованное сообщение..." autocomplete="off">
+          <button class="send-btn" id="btn-send-msg" onclick="submitCurrentMessage()" title="Отправить пакет">ОТПР</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- =======================================================================
+       MODAL 1: INVITE / SHARE CRYPTOGRAPHIC URI
+       ======================================================================= -->
+  <div class="modal-overlay" id="modal-invite" onclick="if(event.target===this)closeModals()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title">КРИПТО-ИНВАЙТ // ПРЯМОЕ СОЕДИНЕНИЕ</span>
+        <button class="modal-close" onclick="closeModals()">✕</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">URI ССЫЛКА (PUBLIC KEY + ENDPOINT + SWARM)</label>
+        <div class="code-box" id="invite-link-box">wex://join/...</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn primary mono" onclick="copyTextWithToast(document.getElementById('invite-link-box').innerText, 'ИНВАЙТ-ССЫЛКА СКОПИРОВАНА')">КОПИРОВАТЬ URI</button>
+        <button class="btn mono" onclick="shareInviteNative()">ПОДЕЛИТЬСЯ</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">ВАШ ED25519 PUBLIC KEY (64 HEX)</label>
+        <div class="code-box" id="invite-pk-box">...</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn mono" onclick="copyTextWithToast(myPublicKey, 'PUBLIC KEY СКОПИРОВАН')">КОПИРОВАТЬ PUBLIC KEY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =======================================================================
+       MODAL 2: ADD CONTACT / CONNECT PEER BY PUBLIC KEY, INVITE OR IP
+       ======================================================================= -->
+  <div class="modal-overlay" id="modal-connect" onclick="if(event.target===this)closeModals()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title">ДОБАВИТЬ КОНТАКТ // УЗЕЛ</span>
+        <button class="modal-close" onclick="closeModals()">✕</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="connect-target-input">PUBLIC KEY (64 HEX), ССЫЛКА WEX://JOIN ИЛИ IP:PORT</label>
+        <input type="text" class="text-input mono" id="connect-target-input" placeholder="wex://join/... или 64-значный Public Key">
+      </div>
+      <div class="modal-actions">
+        <button class="btn mono" onclick="pasteIntoInput('connect-target-input')">ВСТАВИТЬ</button>
+        <button class="btn primary mono" onclick="submitConnectPeer()">ПОДКЛЮЧИТЬ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =======================================================================
+       MODAL 3: UNIVERSAL INPUT (CREATE SWARM / CREATE CHANNEL / EDIT PACKET)
+       ======================================================================= -->
+  <div class="modal-overlay" id="modal-input" onclick="if(event.target===this)closeModals()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title" id="modal-input-title">СОЗДАТЬ</span>
+        <button class="modal-close" onclick="closeModals()">✕</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label" id="modal-input-label" for="modal-input-field"> ПАРАМЕТР</label>
+        <input type="text" class="text-input" id="modal-input-field">
+      </div>
+      <div class="modal-actions">
+        <button class="btn mono" onclick="closeModals()">ОТМЕНА</button>
+        <button class="btn primary mono" onclick="submitInputModal()">ПОДТВЕРДИТЬ</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="wex_app.js"></script>
+</body>
+</html>

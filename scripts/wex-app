@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Wex-Chat Desktop App Launcher (Electron-Equivalent Standalone App Runner)
+# ==============================================================================
+# Automatically starts the local C99 Wex-Chat daemon (if not already listening
+# on 127.0.0.1:9000), waits up to 2 seconds for readiness, opens a chromeless
+# native desktop window without URL bar or browser tabs, and cleanly terminates
+# the background daemon on window exit if this launcher started it.
+# ==============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+DAEMON_BIN="${PROJECT_ROOT}/build/wex_daemon"
+
+HOST="127.0.0.1"
+PORT="${WEX_WS_PORT:-9000}"
+APP_URL="http://${HOST}:${PORT}"
+USER_DATA_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/wex-chat-app-profile"
+
+DAEMON_PID=""
+STARTED_DAEMON=0
+CHECK_ONLY=0
+
+if [[ "${1:-}" == "--check" ]]; then
+    CHECK_ONLY=1
+    shift
+fi
+
+# Cleanly terminate the background daemon if we started it
+cleanup() {
+    if [[ "${STARTED_DAEMON}" -eq 1 && -n "${DAEMON_PID}" ]]; then
+        if kill -0 "${DAEMON_PID}" 2>/dev/null; then
+            kill -TERM "${DAEMON_PID}" 2>/dev/null || true
+            wait "${DAEMON_PID}" 2>/dev/null || true
+        fi
+    fi
+}
+trap cleanup EXIT INT TERM
+
+# Check if 127.0.0.1:$PORT is accepting TCP connections
+is_port_listening() {
+    if command -v nc >/dev/null 2>&1; then
+        nc -z "${HOST}" "${PORT}" >/dev/null 2>&1
+        return $?
+    elif command -v ss >/dev/null 2>&1; then
+        ss -tln | grep -qE ":${PORT}\b"
+        return $?
+    else
+        (echo >/dev/tcp/"${HOST}"/"${PORT}") >/dev/null 2>&1
+        return $?
+    fi
+}
+
+cd "${PROJECT_ROOT}"
+
+# Build daemon automatically if binary does not exist
+if [[ ! -x "${DAEMON_BIN}" ]]; then
+    echo "[wex-app] Daemon binary not found at ${DAEMON_BIN}, building..."
+    cmake -B "${PROJECT_ROOT}/build" "${PROJECT_ROOT}"
+    cmake --build "${PROJECT_ROOT}/build" --target wex_daemon
+fi
+
+# 1. Start ./build/wex_daemon in the background if not already listening on port 9000
+if is_port_listening; then
+    echo "[wex-app] Wex-Chat daemon already listening on ${HOST}:${PORT}"
+else
+    echo "[wex-app] Starting ./build/wex_daemon on ${HOST}:${PORT}..."
+    ./build/wex_daemon --ws "${PORT}" "$@" >/dev/null 2>&1 &
+    DAEMON_PID=$!
+    STARTED_DAEMON=1
+
+    # Wait up to 2 seconds (20 x 0.1s) for 127.0.0.1:9000 to accept connections
+    READY=0
+    for _ in {1..20}; do
+        if is_port_listening; then
+            READY=1
+            break
+        fi
+        sleep 0.1
+    done
+
+    if [[ "${READY}" -ne 1 ]]; then
+        echo "[wex-app] Error: Daemon failed to listen on ${HOST}:${PORT} within 2 seconds." >&2
+        exit 1
+    fi
+    echo "[wex-app] Daemon ready (PID ${DAEMON_PID}) on ${APP_URL}"
+fi
+
+if [[ "${CHECK_ONLY}" -eq 1 ]]; then
+    echo "[wex-app] Readiness check passed for ${APP_URL}"
+    exit 0
+fi
+
+# 2. Launch a chromeless standalone desktop application window
+mkdir -p "${USER_DATA_DIR}"
+
+CHROME_FLAGS=(
+    "--app=${APP_URL}"
+    "--class=WexChat"
+    "--user-data-dir=${USER_DATA_DIR}"
+    "--window-size=1280,820"
+    "--no-first-run"
+    "--no-default-browser-check"
+)
+
+if command -v google-chrome >/dev/null 2>&1; then
+    echo "[wex-app] Launching chromeless window via google-chrome..."
+    google-chrome "${CHROME_FLAGS[@]}"
+elif command -v google-chrome-stable >/dev/null 2>&1; then
+    echo "[wex-app] Launching chromeless window via google-chrome-stable..."
+    google-chrome-stable "${CHROME_FLAGS[@]}"
+elif command -v chromium >/dev/null 2>&1; then
+    echo "[wex-app] Launching chromeless window via chromium..."
+    chromium "${CHROME_FLAGS[@]}"
+elif command -v chromium-browser >/dev/null 2>&1; then
+    echo "[wex-app] Launching chromeless window via chromium-browser..."
+    chromium-browser "${CHROME_FLAGS[@]}"
+elif command -v brave-browser >/dev/null 2>&1; then
+    echo "[wex-app] Launching chromeless window via brave-browser..."
+    brave-browser "${CHROME_FLAGS[@]}"
+elif command -v microsoft-edge >/dev/null 2>&1; then
+    echo "[wex-app] Launching chromeless window via microsoft-edge..."
+    microsoft-edge "${CHROME_FLAGS[@]}"
+elif command -v python3 >/dev/null 2>&1 && python3 -c "import webview" >/dev/null 2>&1; then
+    echo "[wex-app] Launching native window via Python pywebview..."
+    python3 -c "import webview; webview.create_window('Wex-Chat', '${APP_URL}', width=1280, height=820); webview.start()"
+elif command -v python3 >/dev/null 2>&1 && python3 -c "import gi; gi.require_version('Gtk', '3.0'); gi.require_version('WebKit2', '4.0')" >/dev/null 2>&1; then
+    echo "[wex-app] Launching native window via GTK WebKit2..."
+    python3 - "${APP_URL}" << 'PYEOF'
+import sys, gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('WebKit2', '4.0')
+from gi.repository import Gtk, WebKit2
+
+win = Gtk.Window(title="Wex-Chat")
+win.set_default_size(1280, 820)
+win.set_wmclass("WexChat", "WexChat")
+win.connect("destroy", Gtk.main_quit)
+webview = WebKit2.WebView()
+webview.load_uri(sys.argv[1])
+win.add(webview)
+win.show_all()
+Gtk.main()
+PYEOF
+elif command -v xdg-open >/dev/null 2>&1; then
+    echo "[wex-app] Launching fallback via xdg-open..."
+    xdg-open "${APP_URL}"
+    if [[ "${STARTED_DAEMON}" -eq 1 && -n "${DAEMON_PID}" ]]; then
+        echo "[wex-app] Press Ctrl+C to stop Wex-Chat daemon (PID ${DAEMON_PID})..."
+        wait "${DAEMON_PID}"
+    fi
+else
+    echo "[wex-app] Open ${APP_URL} in your browser."
+    if [[ "${STARTED_DAEMON}" -eq 1 && -n "${DAEMON_PID}" ]]; then
+        wait "${DAEMON_PID}"
+    fi
+fi

@@ -95,7 +95,10 @@ public class WexService extends Service {
             if (!dataDir.exists()) {
                 dataDir.mkdirs();
             }
-            startNativeDaemon(dataDir.getAbsolutePath(), 9000, 9001, "AndroidPeer", "");
+            String defaultNick = (Build.MODEL != null && !Build.MODEL.trim().isEmpty())
+                ? Build.MODEL.trim()
+                : "AndroidPeer";
+            startNativeDaemon(dataDir.getAbsolutePath(), 9000, 9001, defaultNick, "");
             daemonRunning = true;
         }
 

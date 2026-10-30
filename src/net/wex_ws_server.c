@@ -1,6 +1,10 @@
 #define _GNU_SOURCE
 #include "wex_ws_server.h"
 #include "wex_sha1.h"
+#include "wex_crypto.h"
+#include "wex_nat.h"
+#include "wex_persist.h"
+#include "wex_permissions.h"
 #include "../../vendor/cjson/cJSON.h"
 
 #include <stdio.h>
@@ -121,17 +125,33 @@ static void on_p2p_incoming_msg(const wex_chat_msg_t *msg, void *user_data) {
         }
     }
 
+    bool is_dm = (strncmp(msg->channel, "dm:", 3) == 0);
+    bool is_encrypted = ((msg->enc_flags & WEX_ENC_DM_E2EE) != 0) || is_dm;
+
+    char author_pk_hex[65];
+    wex_id_to_hex(msg->author_pk, author_pk_hex);
+
     /* Save to history */
     if (srv->history_count < WEX_MAX_HISTORY) {
-        srv->history[srv->history_count++] = *msg;
+        wex_chat_msg_t saved = *msg;
+        if (is_encrypted) {
+            saved.enc_flags |= WEX_ENC_DM_E2EE;
+        }
+        srv->history[srv->history_count++] = saved;
     }
 
     /* Broadcast to Web UI */
     cJSON *out = cJSON_CreateObject();
     cJSON_AddStringToObject(out, "type", "message");
     cJSON_AddStringToObject(out, "author", msg->author);
+    cJSON_AddStringToObject(out, "author_pk", author_pk_hex);
+    if (is_dm) {
+        cJSON_AddStringToObject(out, "peer_pk", author_pk_hex);
+    }
     cJSON_AddStringToObject(out, "channel", msg->channel);
     cJSON_AddStringToObject(out, "content", msg->content);
+    cJSON_AddBoolToObject(out, "verified", true);
+    cJSON_AddBoolToObject(out, "encrypted", is_encrypted);
     cJSON_AddNumberToObject(out, "timestamp_ms", (double)msg->timestamp_ms);
 
     char sig_hex[129];
@@ -291,17 +311,13 @@ int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *ni
         return -1;
     }
 
-    /* Initialize default space */
-    wex_space_create(&srv->spaces[0], "Wex Realm");
-    srv->space_count = 1;
+    srv->space_count = 0;
 
     /* Initialize P2P UDP engine */
     if (wex_p2p_init(&srv->p2p, &srv->identity, srv->udp_port) != 0) {
         return -1;
     }
     srv->p2p.lan_discovery_enabled = true;
-    wex_p2p_add_space(&srv->p2p, &srv->spaces[0]);
-    wex_p2p_set_active_space(&srv->p2p, srv->spaces[0].space_id);
     wex_p2p_set_callbacks(&srv->p2p, on_p2p_incoming_msg, on_p2p_peer_event, srv);
     wex_p2p_set_sync_callback(&srv->p2p, on_p2p_sync_request);
     wex_p2p_set_blob_callback(&srv->p2p, on_p2p_blob_event);
@@ -369,8 +385,12 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
     char pk_hex[65];
     wex_id_to_hex(srv->identity.sign_pk, pk_hex);
     cJSON_AddStringToObject(ident, "public_key", pk_hex);
+    char xpk_hex[65];
+    wex_id_to_hex(srv->identity.x25519_pk, xpk_hex);
+    cJSON_AddStringToObject(ident, "x25519_key", xpk_hex);
     cJSON_AddNumberToObject(ident, "udp_port", srv->udp_port);
     cJSON_AddNumberToObject(ident, "dht_contacts", (double)srv->p2p.dht.total_contacts);
+    cJSON_AddNumberToObject(ident, "offline_shards", (double)srv->p2p.offline_store.count);
     if (srv->p2p.has_external_addr) {
         char ext_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &srv->p2p.external_addr.sin_addr, ext_ip, sizeof(ext_ip));
@@ -419,18 +439,49 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
             inet_ntop(AF_INET, &srv->p2p.peers[p].addr.sin_addr, ip_buf, sizeof(ip_buf));
             cJSON_AddStringToObject(peer_obj, "ip", ip_buf);
             cJSON_AddNumberToObject(peer_obj, "port", ntohs(srv->p2p.peers[p].addr.sin_port));
+            cJSON_AddBoolToObject(peer_obj, "use_relay", srv->p2p.peers[p].use_relay);
             cJSON_AddItemToArray(peers, peer_obj);
         }
     }
     cJSON_AddItemToObject(root, "peers", peers);
+
+    cJSON *dht_list = cJSON_CreateArray();
+    size_t dht_added = 0;
+    for (int b = 0; b < WEX_DHT_NUM_BUCKETS && dht_added < 24; b++) {
+        for (size_t c = 0; c < srv->p2p.dht.buckets[b].count && dht_added < 24; c++) {
+            const wex_dht_contact_t *ct = &srv->p2p.dht.buckets[b].contacts[c];
+            cJSON *dnode = cJSON_CreateObject();
+            char cid_hex[65];
+            wex_id_to_hex(ct->id, cid_hex);
+            cJSON_AddStringToObject(dnode, "id", cid_hex);
+            char dip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &ct->addr.sin_addr, dip, sizeof(dip));
+            cJSON_AddStringToObject(dnode, "ip", dip);
+            cJSON_AddNumberToObject(dnode, "port", ntohs(ct->addr.sin_port));
+            cJSON_AddNumberToObject(dnode, "bucket", b);
+            cJSON_AddItemToArray(dht_list, dnode);
+            dht_added++;
+        }
+    }
+    cJSON_AddItemToObject(root, "dht_nodes", dht_list);
 
     cJSON *hist = cJSON_CreateArray();
     for (size_t h = 0; h < srv->history_count; h++) {
         cJSON *m = cJSON_CreateObject();
         cJSON_AddStringToObject(m, "type", "message");
         cJSON_AddStringToObject(m, "author", srv->history[h].author);
+
+        char apk_hex[65];
+        wex_id_to_hex(srv->history[h].author_pk, apk_hex);
+        cJSON_AddStringToObject(m, "author_pk", apk_hex);
+
+        bool h_is_dm = (strncmp(srv->history[h].channel, "dm:", 3) == 0);
+        bool h_encrypted = ((srv->history[h].enc_flags & WEX_ENC_DM_E2EE) != 0) || h_is_dm;
+
         cJSON_AddStringToObject(m, "channel", srv->history[h].channel);
         cJSON_AddStringToObject(m, "content", srv->history[h].content);
+        cJSON_AddBoolToObject(m, "verified", true);
+        cJSON_AddBoolToObject(m, "encrypted", h_encrypted);
         cJSON_AddNumberToObject(m, "timestamp_ms", (double)srv->history[h].timestamp_ms);
 
         char sig_hex[129];
@@ -471,11 +522,28 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
 
     if (strcmp(action->valuestring, "get_status") == 0) {
         send_status_json(srv, client_fd);
-    } else if (strcmp(action->valuestring, "connect_peer") == 0 || strcmp(action->valuestring, "join_invite") == 0) {
+    } else if (strcmp(action->valuestring, "add_contact") == 0 ||
+               strcmp(action->valuestring, "connect_peer") == 0 ||
+               strcmp(action->valuestring, "join_invite") == 0) {
         cJSON *target = cJSON_GetObjectItem(root, "target");
         if (!target) target = cJSON_GetObjectItem(root, "uri");
+        if (!target) target = cJSON_GetObjectItem(root, "public_key");
+        if (!target) target = cJSON_GetObjectItem(root, "pk");
         if (target && cJSON_IsString(target) && strlen(target->valuestring) > 0) {
-            wex_p2p_join_invite(&srv->p2p, target->valuestring);
+            const char *t_str = target->valuestring;
+            while (*t_str == ' ' || *t_str == '\t') t_str++;
+            wex_p2p_join_invite(&srv->p2p, t_str);
+            if (strlen(t_str) == 64 && strchr(t_str, ':') == NULL) {
+                uint8_t pk[32];
+                if (wex_hex_to_id(t_str, pk) == 0) {
+                    wex_p2p_connect_by_pk(&srv->p2p, pk);
+                    for (size_t i = 0; i < srv->p2p.peer_count; i++) {
+                        if (srv->p2p.peers[i].active) {
+                            wex_p2p_pull_offline_msgs(&srv->p2p, &srv->p2p.peers[i].addr);
+                        }
+                    }
+                }
+            }
             send_status_json(srv, client_fd);
         } else {
             cJSON *ip = cJSON_GetObjectItem(root, "ip");
@@ -499,15 +567,88 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
         }
     } else if (strcmp(action->valuestring, "set_profile") == 0) {
         cJSON *nick = cJSON_GetObjectItem(root, "nickname");
-        if (nick && cJSON_IsString(nick)) {
+        cJSON *status = cJSON_GetObjectItem(root, "status");
+        if (nick && cJSON_IsString(nick) && strlen(nick->valuestring) > 0) {
             strncpy(srv->identity.nickname, nick->valuestring, sizeof(srv->identity.nickname) - 1);
-            send_status_json(srv, client_fd);
+            srv->identity.nickname[sizeof(srv->identity.nickname) - 1] = '\0';
         }
+        if (status && cJSON_IsString(status) && strlen(status->valuestring) > 0) {
+            strncpy(srv->identity.status, status->valuestring, sizeof(srv->identity.status) - 1);
+            srv->identity.status[sizeof(srv->identity.status) - 1] = '\0';
+        }
+        const char *dir = (strlen(srv->p2p.data_dir) > 0) ? srv->p2p.data_dir : "./.wex_data";
+        wex_mkdir_p(dir);
+        char key_path[560];
+        snprintf(key_path, sizeof(key_path), "%s/identity.key", dir);
+        wex_identity_save(&srv->identity, key_path);
+        send_status_json(srv, client_fd);
+    } else if (strcmp(action->valuestring, "export_secret") == 0) {
+        char seed_hex[65];
+        char pk_hex[65];
+        wex_id_to_hex(srv->identity.seed, seed_hex);
+        wex_id_to_hex(srv->identity.sign_pk, pk_hex);
+        cJSON *resp = cJSON_CreateObject();
+        cJSON_AddStringToObject(resp, "type", "secret_exported");
+        cJSON_AddStringToObject(resp, "seed_hex", seed_hex);
+        cJSON_AddStringToObject(resp, "public_key", pk_hex);
+        char *resp_str = cJSON_PrintUnformatted(resp);
+        if (resp_str) {
+            send_ws_frame(client_fd, resp_str, strlen(resp_str));
+            free(resp_str);
+        }
+        cJSON_Delete(resp);
+    } else if (strcmp(action->valuestring, "import_secret") == 0) {
+        cJSON *seed_json = cJSON_GetObjectItem(root, "seed_hex");
+        if (!seed_json) seed_json = cJSON_GetObjectItem(root, "seed");
+        if (seed_json && cJSON_IsString(seed_json) && strlen(seed_json->valuestring) == 64) {
+            uint8_t seed[32];
+            if (wex_hex_to_id(seed_json->valuestring, seed) == 0) {
+                char current_nick[WEX_NAME_LEN];
+                char current_status[32];
+                strncpy(current_nick, srv->identity.nickname, sizeof(current_nick) - 1);
+                current_nick[sizeof(current_nick) - 1] = '\0';
+                strncpy(current_status, srv->identity.status, sizeof(current_status) - 1);
+                current_status[sizeof(current_status) - 1] = '\0';
+
+                if (wex_identity_init(&srv->identity, seed, current_nick) == 0) {
+                    if (strlen(current_status) > 0) {
+                        strncpy(srv->identity.status, current_status, sizeof(srv->identity.status) - 1);
+                        srv->identity.status[sizeof(srv->identity.status) - 1] = '\0';
+                    }
+                    memcpy(srv->p2p.dht.local_id, srv->identity.sign_pk, 32);
+                    const char *dir = (strlen(srv->p2p.data_dir) > 0) ? srv->p2p.data_dir : "./.wex_data";
+                    wex_mkdir_p(dir);
+                    char key_path[560];
+                    snprintf(key_path, sizeof(key_path), "%s/identity.key", dir);
+                    wex_identity_save(&srv->identity, key_path);
+                    send_status_json(srv, client_fd);
+                }
+                wex_clean(seed, sizeof(seed));
+            }
+        }
+    } else if (strcmp(action->valuestring, "lan_beacon") == 0) {
+        wex_p2p_send_lan_beacon(&srv->p2p);
+        send_status_json(srv, client_fd);
+    } else if (strcmp(action->valuestring, "stun_probe") == 0) {
+        struct sockaddr_in ext_addr;
+        if (wex_nat_auto_discover(srv->p2p.udp_fd, &ext_addr) == 0) {
+            srv->p2p.external_addr = ext_addr;
+            srv->p2p.has_external_addr = true;
+        }
+        send_status_json(srv, client_fd);
+    } else if (strcmp(action->valuestring, "pull_offline") == 0) {
+        for (size_t i = 0; i < srv->p2p.peer_count; i++) {
+            if (srv->p2p.peers[i].active) {
+                wex_p2p_pull_offline_msgs(&srv->p2p, &srv->p2p.peers[i].addr);
+            }
+        }
+        send_status_json(srv, client_fd);
     } else if (strcmp(action->valuestring, "create_space") == 0) {
         cJSON *name = cJSON_GetObjectItem(root, "name");
         if (name && cJSON_IsString(name) && srv->space_count < WEX_MAX_SPACES) {
             wex_space_create(&srv->spaces[srv->space_count], name->valuestring);
             wex_p2p_add_space(&srv->p2p, &srv->spaces[srv->space_count]);
+            wex_p2p_set_active_space(&srv->p2p, srv->spaces[srv->space_count].space_id);
             srv->space_count++;
             send_status_json(srv, client_fd);
         }
@@ -551,13 +692,28 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
                 srv->history[srv->history_count++] = msg;
             }
 
+            if (srv->journal && srv->p2p.journal != srv->journal) {
+                wex_journal_append(srv->journal, &msg);
+            }
+
+            char my_pk_hex[65];
+            wex_id_to_hex(srv->identity.sign_pk, my_pk_hex);
+            char sig_hex[129];
+            for (int i = 0; i < 64; i++) sprintf(sig_hex + (i * 2), "%02x", msg.signature[i]);
+            sig_hex[128] = '\0';
+
             /* 1. Broadcast locally to WebSockets */
             cJSON *out = cJSON_CreateObject();
             cJSON_AddStringToObject(out, "type", "message");
             cJSON_AddStringToObject(out, "author", msg.author);
+            cJSON_AddStringToObject(out, "author_pk", my_pk_hex);
             cJSON_AddStringToObject(out, "channel", msg.channel);
             cJSON_AddStringToObject(out, "content", msg.content);
+            cJSON_AddBoolToObject(out, "verified", true);
+            cJSON_AddBoolToObject(out, "encrypted", false);
+            cJSON_AddStringToObject(out, "signature", sig_hex);
             cJSON_AddNumberToObject(out, "timestamp_ms", (double)msg.timestamp_ms);
+            cJSON_AddStringToObject(out, "reactions", "");
 
             char *json_out = cJSON_PrintUnformatted(out);
             if (json_out) {
@@ -603,7 +759,10 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
         }
     } else if (strcmp(action->valuestring, "send_dm") == 0) {
         cJSON *target_pk_json = cJSON_GetObjectItem(root, "target_pk");
+        if (!target_pk_json) target_pk_json = cJSON_GetObjectItem(root, "peer_pk");
+        if (!target_pk_json) target_pk_json = cJSON_GetObjectItem(root, "to");
         cJSON *text = cJSON_GetObjectItem(root, "text");
+        if (!text) text = cJSON_GetObjectItem(root, "content");
         if (target_pk_json && cJSON_IsString(target_pk_json) && text && cJSON_IsString(text)) {
             uint8_t target_pk[32];
             if (wex_hex_to_id(target_pk_json->valuestring, target_pk) == 0) {
@@ -612,26 +771,50 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
                 /* Broadcast to local WebSocket UI */
                 char ch_name[64];
                 char target_hex[65];
+                char my_pk_hex[65];
                 wex_id_to_hex(target_pk, target_hex);
+                wex_id_to_hex(srv->identity.sign_pk, my_pk_hex);
                 snprintf(ch_name, sizeof(ch_name), "dm:%.58s", target_hex);
 
                 wex_chat_msg_t local_msg;
                 memset(&local_msg, 0, sizeof(local_msg));
+                if (srv->p2p.space_count > 0) {
+                    memcpy(local_msg.space_id, srv->p2p.active_space_id, WEX_ID_LEN);
+                } else if (srv->space_count > 0) {
+                    memcpy(local_msg.space_id, srv->spaces[0].space_id, WEX_ID_LEN);
+                }
                 strncpy(local_msg.author, srv->identity.nickname, sizeof(local_msg.author) - 1);
+                memcpy(local_msg.author_pk, srv->identity.sign_pk, 32);
                 strncpy(local_msg.channel, ch_name, sizeof(local_msg.channel) - 1);
                 strncpy(local_msg.content, text->valuestring, sizeof(local_msg.content) - 1);
                 local_msg.timestamp_ms = (uint64_t)time(NULL) * 1000ULL;
+                wex_chat_msg_sign(&local_msg, &srv->identity);
+                local_msg.enc_flags = WEX_ENC_DM_E2EE;
 
                 if (srv->history_count < WEX_MAX_HISTORY) {
                     srv->history[srv->history_count++] = local_msg;
                 }
 
+                if (srv->journal && srv->p2p.journal != srv->journal) {
+                    wex_journal_append(srv->journal, &local_msg);
+                }
+
+                char sig_hex[129];
+                for (int i = 0; i < 64; i++) sprintf(sig_hex + (i * 2), "%02x", local_msg.signature[i]);
+                sig_hex[128] = '\0';
+
                 cJSON *out = cJSON_CreateObject();
                 cJSON_AddStringToObject(out, "type", "message");
-                cJSON_AddStringToObject(out, "author", local_msg.author);
+                cJSON_AddStringToObject(out, "author", srv->identity.nickname);
+                cJSON_AddStringToObject(out, "author_pk", my_pk_hex);
+                cJSON_AddStringToObject(out, "peer_pk", target_hex);
                 cJSON_AddStringToObject(out, "channel", local_msg.channel);
                 cJSON_AddStringToObject(out, "content", local_msg.content);
+                cJSON_AddBoolToObject(out, "verified", true);
+                cJSON_AddBoolToObject(out, "encrypted", true);
+                cJSON_AddStringToObject(out, "signature", sig_hex);
                 cJSON_AddNumberToObject(out, "timestamp_ms", (double)local_msg.timestamp_ms);
+                cJSON_AddStringToObject(out, "reactions", "");
                 char *json_out = cJSON_PrintUnformatted(out);
                 if (json_out) {
                     wex_server_broadcast(srv, json_out);
@@ -904,7 +1087,7 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
                 wex_voice_hdr_t vhdr;
                 wex_voice_create_header(&srv->voice_room, &vhdr, audio_len);
 
-                wex_p2p_send_voice_frame(&srv->p2p, srv->spaces[0].space_id, srv->voice_room.channel, &vhdr, audio_bytes, audio_len);
+                wex_p2p_send_voice_frame(&srv->p2p, srv->p2p.active_space_id, srv->voice_room.channel, &vhdr, audio_bytes, audio_len);
                 free(audio_bytes);
             }
         }

@@ -535,8 +535,10 @@ int wex_p2p_create_invite(const wex_p2p_node_t *node, char *out_uri, size_t max_
     char pk_hex[65];
     wex_id_to_hex(node->identity->sign_pk, pk_hex);
 
-    char key_hex[65] = {0};
-    char space_name[WEX_NAME_LEN] = "Wex_Realm";
+    char key_hex[65];
+    memset(key_hex, '0', 64);
+    key_hex[64] = '\0';
+    char space_name[WEX_NAME_LEN] = "Direct_Contact";
 
     const wex_space_t *sp = NULL;
     for (size_t i = 0; i < node->space_count; i++) {
@@ -545,7 +547,19 @@ int wex_p2p_create_invite(const wex_p2p_node_t *node, char *out_uri, size_t max_
             break;
         }
     }
-    if (sp) {
+    if (!sp && node->space_count == 0) {
+        memset(space_hex, '0', 64);
+        space_hex[64] = '\0';
+        if (strlen(node->identity->nickname) > 0) {
+            strncpy(space_name, node->identity->nickname, sizeof(space_name) - 1);
+            space_name[sizeof(space_name) - 1] = '\0';
+            for (size_t c = 0; space_name[c] != '\0'; c++) {
+                if (space_name[c] == ' ' || space_name[c] == '&' || space_name[c] == '?') {
+                    space_name[c] = '_';
+                }
+            }
+        }
+    } else if (sp) {
         wex_id_to_hex(sp->space_key, key_hex);
         strncpy(space_name, sp->name, sizeof(space_name) - 1);
         space_name[sizeof(space_name) - 1] = '\0';
@@ -601,7 +615,11 @@ int wex_p2p_join_invite(wex_p2p_node_t *node, const char *invite_or_target) {
         }
 
         uint8_t parsed_space_id[32];
-        bool has_space_id = (strlen(path) == 64 && wex_hex_to_id(path, parsed_space_id) == 0);
+        uint8_t zero_id[32];
+        memset(zero_id, 0, 32);
+        bool has_space_id = (strlen(path) == 64 &&
+                             wex_hex_to_id(path, parsed_space_id) == 0 &&
+                             memcmp(parsed_space_id, zero_id, 32) != 0);
 
         char peer_addr_str[128] = {0};
         uint8_t peer_pk[32];

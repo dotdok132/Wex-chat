@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.os.Build;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -65,6 +66,11 @@ public class MainActivity extends Activity {
             Intent shareIntent = Intent.createChooser(sendIntent, "Поделиться инвайтом Wex-Chat");
             shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             ctx.startActivity(shareIntent);
+        }
+
+        @JavascriptInterface
+        public String getDeviceName() {
+            return (Build.MODEL != null && !Build.MODEL.trim().isEmpty()) ? Build.MODEL.trim() : "Android";
         }
     }
 
@@ -126,8 +132,8 @@ public class MainActivity extends Activity {
             Window window = getWindow();
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.setStatusBarColor(Color.parseColor("#1e1f22"));
-            window.setNavigationBarColor(Color.parseColor("#1e1f22"));
+            window.setStatusBarColor(Color.parseColor("#0a0b0d"));
+            window.setNavigationBarColor(Color.parseColor("#0a0b0d"));
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
         }
 
@@ -140,7 +146,8 @@ public class MainActivity extends Activity {
         }
 
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.parseColor("#313338"));
+        webView.setBackgroundColor(Color.parseColor("#0a0b0d"));
+        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         setContentView(webView);
 
         WebSettings s = webView.getSettings();
@@ -182,8 +189,9 @@ public class MainActivity extends Activity {
             webView.evaluateJavascript(
                 "(function(){" +
                 "  var m = document.querySelector('.modal-overlay.open');" +
-                "  if (m) { closeModals(); return 'handled'; }" +
-                "  if (document.body.classList.contains('drawer-open')) { toggleMobileDrawer(false); return 'handled'; }" +
+                "  if (m) { if (typeof closeModals === 'function') closeModals(); return 'handled'; }" +
+                "  if (document.body.classList.contains('chat-active')) { if (typeof closeActiveChat === 'function') closeActiveChat(); else document.body.classList.remove('chat-active'); return 'handled'; }" +
+                "  if (document.body.classList.contains('drawer-open')) { if (typeof toggleMobileDrawer === 'function') toggleMobileDrawer(false); return 'handled'; }" +
                 "  return 'exit';" +
                 "})()",
                 value -> {

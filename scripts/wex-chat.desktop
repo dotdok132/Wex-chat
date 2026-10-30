@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Wex-Chat
+GenericName=Sovereign P2P Chat
+Comment=Privacy-first, decentralized P2P communication without central servers
+Exec=/home/dotdok/Wex-chat/scripts/wex-app
+Path=/home/dotdok/Wex-chat
+Icon=utilities-terminal
+Terminal=false
+StartupNotify=true
+StartupWMClass=WexChat
+Categories=Network;Chat;InstantMessaging;P2P;
+Keywords=chat;p2p;discord;encrypted;sovereign;wex;
