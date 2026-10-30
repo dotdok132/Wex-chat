@@ -29,3 +29,4 @@ coverage/
 Testing/
 .test_*
 .wex_data/
+android/build/

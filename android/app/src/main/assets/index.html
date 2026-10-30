@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wex-Chat | Sovereign P2P</title>
+  <style>
+    :root {
+      --bg-darkest: #1e1f22;
+      --bg-darker: #2b2d31;
+      --bg-dark: #313338;
+      --bg-light: #383a40;
+      --accent: #5865f2;
+      --accent-hover: #4752c4;
+      --text-normal: #dbdee1;
+      --text-muted: #949ba4;
+      --green: #23a55a;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Helvetica, Arial, sans-serif; }
+    body { display: flex; height: 100vh; background: var(--bg-dark); color: var(--text-normal); overflow: hidden; }
+    
+    /* Sidebar: Guilds / Spaces */
+    #guilds-bar { width: 72px; background: var(--bg-darkest); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 8px; }
+    .guild-icon { width: 48px; height: 48px; border-radius: 50%; background: var(--bg-darker); display: flex; align-items: center; justify-content: center; font-weight: bold; cursor: pointer; transition: all 0.2s; color: var(--text-normal); text-decoration: none; user-select: none; }
+    .guild-icon:hover, .guild-icon.active { border-radius: 16px; background: var(--accent); color: #fff; }
+    .guild-icon.add-btn { background: var(--bg-light); color: var(--green); font-size: 24px; }
+    .guild-icon.add-btn:hover { background: var(--green); color: #fff; }
+    
+    /* Channels Sidebar */
+    #channels-bar { width: 240px; background: var(--bg-darker); display: flex; flex-direction: column; }
+    .server-header { height: 48px; border-bottom: 1px solid var(--bg-darkest); display: flex; align-items: center; padding: 0 16px; font-weight: bold; font-size: 15px; }
+    .channel-list { flex: 1; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+    .channel-item { display: flex; align-items: center; padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: 14px; }
+    .channel-item:hover { background: var(--bg-light); color: var(--text-normal); }
+    .channel-item.active { background: var(--bg-light); color: #fff; font-weight: 500; }
+    .channel-item::before { content: '#'; margin-right: 6px; font-size: 16px; color: var(--text-muted); }
+    
+    .section-title { font-size: 11px; font-weight: bold; color: var(--text-muted); padding: 8px 8px 4px 8px; text-transform: uppercase; }
+    .peers-list { padding: 4px 8px; display: flex; flex-direction: column; gap: 4px; }
+    .peer-item { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px; border-radius: 4px; font-size: 13px; color: var(--text-normal); cursor: pointer; }
+    .peer-item:hover { background: var(--bg-light); }
+    .peer-left { display: flex; align-items: center; gap: 6px; }
+    .peer-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+    .dm-badge { font-size: 10px; background: var(--accent); color: #fff; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+
+    /* User Footer */
+    .user-footer { height: 52px; background: var(--bg-darkest); display: flex; align-items: center; padding: 0 8px; gap: 8px; }
+    .user-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 13px; }
+    .user-info { flex: 1; overflow: hidden; }
+    .user-name { font-size: 13px; font-weight: bold; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    .user-status { font-size: 11px; color: var(--green); }
+    
+    /* Chat Area */
+    #chat-area { flex: 1; display: flex; flex-direction: column; background: var(--bg-dark); }
+    .chat-header { height: 48px; border-bottom: 1px solid var(--bg-darkest); display: flex; align-items: center; padding: 0 16px; font-weight: bold; gap: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+    .chat-header span { color: var(--text-muted); font-weight: normal; }
+    .header-btns { margin-left: auto; display: flex; gap: 8px; }
+    .btn { background: var(--accent); border: none; padding: 6px 12px; border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px; font-weight: bold; }
+    .btn:hover { background: var(--accent-hover); }
+    .btn.secondary { background: var(--bg-light); color: var(--text-normal); }
+    .btn.secondary:hover { background: #4e5058; color: #fff; }
+
+    .messages-feed { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+    .msg-group { display: flex; gap: 12px; }
+    .msg-avatar { width: 40px; height: 40px; border-radius: 50%; background: #e67e22; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 15px; flex-shrink: 0; }
+    .msg-body { flex: 1; }
+    .msg-meta { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+    .msg-author { font-weight: bold; font-size: 14px; color: #fff; }
+    .msg-time { font-size: 11px; color: var(--text-muted); }
+    .msg-content { font-size: 14px; line-height: 1.4; color: var(--text-normal); word-break: break-word; }
+    .verified-badge { background: #23a55a33; color: #23a55a; border-radius: 3px; font-size: 10px; padding: 1px 4px; font-weight: bold; }
+    .e2ee-badge { background: #5865f233; color: #5865f2; border-radius: 3px; font-size: 10px; padding: 1px 4px; font-weight: bold; }
+    
+    .attachment-card { display: inline-flex; align-items: center; gap: 8px; background: var(--bg-darkest); padding: 8px 12px; border-radius: 6px; margin-top: 6px; border: 1px solid var(--bg-light); text-decoration: none; color: var(--text-normal); cursor: pointer; }
+    .attachment-card:hover { border-color: var(--accent); color: #fff; }
+    .attachment-preview img { max-width: 340px; max-height: 240px; border-radius: 8px; margin-top: 6px; display: block; border: 1px solid var(--bg-light); }
+
+    /* Voice Channel & Actions */
+    .voice-channel { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: 14px; }
+    .voice-channel:hover { background: var(--bg-light); color: var(--text-normal); }
+    .voice-channel.connected { color: var(--green); font-weight: bold; background: #23a55a1a; }
+    .voice-channel::before { content: '🔊'; margin-right: 6px; font-size: 14px; }
+    
+    .voice-status-bar { background: #111214; padding: 8px 12px; border-top: 1px solid var(--bg-darkest); display: none; align-items: center; justify-content: space-between; }
+    .voice-status-bar.active { display: flex; }
+    .voice-conn-title { font-size: 12px; color: var(--green); font-weight: bold; }
+    .voice-conn-sub { font-size: 10px; color: var(--text-muted); }
+
+    .msg-group { position: relative; }
+    .msg-group:hover .msg-actions { display: flex; }
+    .msg-actions { position: absolute; right: 16px; top: -10px; background: var(--bg-darker); border: 1px solid var(--bg-light); border-radius: 6px; padding: 2px 4px; display: none; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); z-index: 10; }
+    .action-btn { background: none; border: none; font-size: 13px; cursor: pointer; padding: 2px 4px; border-radius: 4px; color: var(--text-muted); }
+    .action-btn:hover { background: var(--bg-light); color: #fff; }
+    
+    .reaction-bar { display: flex; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--accent); }
+    
+    .input-box { padding: 16px; background: var(--bg-dark); }
+    .input-wrapper { background: var(--bg-light); border-radius: 8px; padding: 6px 12px; display: flex; align-items: center; gap: 8px; }
+    .input-wrapper input[type="text"] { flex: 1; background: transparent; border: none; outline: none; color: #fff; font-size: 14px; padding: 6px 0; }
+    .input-wrapper input[type="text"]::placeholder { color: var(--text-muted); }
+    .attach-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted); padding: 0 4px; display: flex; align-items: center; }
+    .attach-btn:hover { color: #fff; }
+  </style>
+</head>
+<body>
+  <div id="guilds-bar">
+    <div class="guild-icon active" id="space-avatar">W</div>
+    <div class="guild-icon add-btn" title="Создать новое сообщество" onclick="createNewSpace()">+</div>
+  </div>
+  
+  <div id="channels-bar">
+    <div class="server-header" id="server-title">Wex Realm</div>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="section-title">Каналы</div>
+      <div style="cursor:pointer; color:var(--text-muted); padding-right:12px; font-weight:bold; font-size:18px;" title="Создать канал" onclick="createNewChannel()">+</div>
+    </div>
+    <div class="channel-list" id="channel-container">
+      <div class="channel-item active">general</div>
+      <div class="channel-item">dev</div>
+    </div>
+
+    <div class="section-title">Личные сообщения (E2EE 🔒)</div>
+    <div class="channel-list" id="dm-container" style="max-height: 120px;">
+      <div style="font-size:12px; color:var(--text-muted); padding: 4px;">Нет открытых диалогов</div>
+    </div>
+    
+    <div class="section-title">P2P Соседи (UDP)</div>
+    <div class="peers-list" id="peer-container">
+      <div style="font-size:12px; color:var(--text-muted); padding: 4px;">Поиск пиров в сети...</div>
+    </div>
+
+    <div class="section-title">Голосовые каналы (Opus 48kHz)</div>
+    <div class="channel-list" style="flex:0 0 auto; max-height:80px;">
+      <div class="voice-channel" id="voice-btn" onclick="toggleVoiceConnect('voice-lounge')">
+        <span>voice-lounge</span>
+        <span id="voice-badge" style="font-size:10px; color:var(--text-muted)">Подключиться</span>
+      </div>
+    </div>
+    
+    <div class="voice-status-bar" id="voice-bar">
+      <div class="voice-conn-info">
+        <div class="voice-conn-title">● Голос подключен</div>
+        <div class="voice-conn-sub" id="voice-sub">voice-lounge / P2P UDP</div>
+      </div>
+      <button class="btn secondary" style="padding:4px 8px; font-size:10px;" onclick="toggleVoiceConnect('voice-lounge')">Выйти</button>
+    </div>
+
+    <div class="user-footer">
+      <div class="user-avatar" id="my-avatar">U</div>
+      <div class="user-info">
+        <div class="user-name" id="my-nickname">Connecting...</div>
+        <div class="user-status" id="my-node-status" onclick="changeNodeUrl()" title="Сменить адрес ноды Wex">P2P UDP Ready</div>
+      </div>
+    </div>
+  </div>
+  
+  <div id="chat-area">
+    <div class="chat-header">
+      <span style="color:var(--text-muted)">#</span>
+      <span id="active-channel-name" style="color:#fff; font-weight:bold">general</span>
+      <span id="active-channel-topic">| Sovereign P2P Swarm</span>
+      <div class="header-btns">
+        <button class="btn secondary" onclick="connectToPeerPrompt()">+ Добавить пир</button>
+        <button class="btn" onclick="copyInvite()">Пригласить друга</button>
+      </div>
+    </div>
+    <div class="messages-feed" id="messages"></div>
+    <div class="input-box">
+      <div class="input-wrapper">
+        <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(event)">
+        <button class="attach-btn" title="Прикрепить файл (P2P Blob)" onclick="document.getElementById('file-input').click()">📎</button>
+        <input type="text" id="msg-input" placeholder="Написать в #general (Enter для отправки)..." autocomplete="off">
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let ws;
+    let currentSpaceId = '';
+    let currentChannel = 'general';
+    let currentDmPeerPk = null;
+    let myNick = 'User';
+    let myUdpPort = 9001;
+    let spacesCache = [];
+    let peersCache = [];
+    let openDms = new Set();
+    let blobCache = {};
+    let voiceConnected = false;
+
+    function connectWS() {
+      const savedHost = localStorage.getItem('wex_node_url');
+      const loc = window.location;
+      let host = savedHost || (loc.host ? loc.host : '127.0.0.1:9000');
+      const wsUrl = (loc.protocol === 'https:' ? 'wss://' : 'ws://') + host;
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('[WS] Connected to Wex Daemon');
+        ws.send(JSON.stringify({ action: 'get_status' }));
+      };
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'status') {
+          myNick = data.identity.nickname;
+          myUdpPort = data.identity.udp_port || 9001;
+          document.getElementById('my-nickname').innerText = myNick;
+          document.getElementById('my-avatar').innerText = myNick.charAt(0).toUpperCase();
+          document.getElementById('my-node-status').innerText = `UDP :${myUdpPort} | P2P`;
+          
+          if (data.spaces && data.spaces.length > 0) {
+            spacesCache = data.spaces;
+            renderGuilds(data.spaces);
+            if (!currentSpaceId) {
+              const sp = data.spaces[0];
+              currentSpaceId = sp.id;
+              document.getElementById('server-title').innerText = sp.name;
+              renderChannels(sp.channels);
+            }
+          }
+          if (data.peers) {
+            peersCache = data.peers;
+            renderPeers(data.peers);
+          }
+          if (data.history) {
+            document.getElementById('messages').innerHTML = '';
+            data.history.forEach(appendMessage);
+          }
+          if (data.voice) {
+            voiceConnected = data.voice.connected;
+            document.getElementById('voice-bar').classList.toggle('active', data.voice.connected);
+            document.getElementById('voice-btn').classList.toggle('connected', data.voice.connected);
+            document.getElementById('voice-badge').innerText = data.voice.connected ? 'Подключен' : 'Подключиться';
+          }
+        } else if (data.type === 'peer_joined' || data.type === 'peer_left') {
+          ws.send(JSON.stringify({ action: 'get_status' }));
+        } else if (data.type === 'message') {
+          appendMessage(data);
+          if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+            try {
+              new Notification(`${data.author} (${data.channel})`, { body: data.content });
+            } catch (e) {}
+          }
+        } else if (data.type === 'reaction_updated') {
+          const el = document.getElementById('reacts-' + data.target_sig);
+          if (el) el.innerText = data.summary;
+        } else if (data.type === 'message_edited') {
+          const el = document.getElementById('content-' + data.target_sig);
+          if (el) el.innerText = data.content + ' (ред.)';
+        } else if (data.type === 'message_deleted') {
+          const el = document.getElementById('content-' + data.target_sig);
+          if (el) {
+            el.innerText = '[Сообщение удалено]';
+            el.style.color = 'var(--text-muted)';
+          }
+        } else if (data.type === 'voice_state') {
+          voiceConnected = data.connected;
+          document.getElementById('voice-bar').classList.toggle('active', data.connected);
+          document.getElementById('voice-btn').classList.toggle('connected', data.connected);
+          document.getElementById('voice-badge').innerText = data.connected ? 'Подключен' : 'Подключиться';
+        } else if (data.type === 'voice_stream') {
+          playVoiceChunk(data.data_base64);
+        } else if (data.type === 'blob_data') {
+          blobCache[data.hash] = data.data_base64;
+          const img = document.getElementById(`img-${data.hash}`);
+          if (img) {
+            img.src = `data:image/png;base64,${data.data_base64}`;
+            img.style.display = 'block';
+          }
+        } else if (data.type === 'blob_received') {
+          ws.send(JSON.stringify({ action: 'get_blob', hash: data.hash }));
+        }
+      };
+      
+      ws.onclose = () => {
+        document.getElementById('my-nickname').innerText = 'Переподключение...';
+        setTimeout(connectWS, 1500);
+      };
+    }
+
+    function renderGuilds(spaces) {
+      const container = document.getElementById('guilds-bar');
+      container.innerHTML = '';
+      spaces.forEach(sp => {
+        const div = document.createElement('div');
+        div.className = 'guild-icon' + (sp.id === currentSpaceId ? ' active' : '');
+        div.innerText = (sp.name || 'W').charAt(0).toUpperCase();
+        div.title = sp.name;
+        div.onclick = () => switchSpace(sp.id);
+        container.appendChild(div);
+      });
+      const addBtn = document.createElement('div');
+      addBtn.className = 'guild-icon add-btn';
+      addBtn.title = 'Создать новое сообщество';
+      addBtn.innerText = '+';
+      addBtn.onclick = createNewSpace;
+      container.appendChild(addBtn);
+    }
+
+    function switchSpace(spaceId) {
+      const sp = spacesCache.find(s => s.id === spaceId);
+      if (!sp) return;
+      currentSpaceId = sp.id;
+      document.getElementById('server-title').innerText = sp.name;
+      renderGuilds(spacesCache);
+      renderChannels(sp.channels);
+      if (sp.channels && sp.channels.length > 0) {
+        switchChannel(sp.channels[0]);
+      }
+    }
+
+    function renderChannels(channels) {
+      const container = document.getElementById('channel-container');
+      container.innerHTML = '';
+      channels.forEach(ch => {
+        const div = document.createElement('div');
+        div.className = 'channel-item' + (ch === currentChannel ? ' active' : '');
+        div.innerText = ch;
+        div.onclick = () => switchChannel(ch, div);
+        container.appendChild(div);
+      });
+    }
+
+    function renderPeers(peers) {
+      const container = document.getElementById('peer-container');
+      container.innerHTML = '';
+      if (!peers || peers.length === 0) {
+        container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding:4px;">Нет подключенных пиров</div>';
+        return;
+      }
+      peers.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'peer-item';
+        item.innerHTML = `
+          <div class="peer-left">
+            <span class="peer-dot"></span>
+            <span>${p.nickname}</span>
+          </div>
+          <span class="dm-badge" title="Открыть защищённый диалог (E2EE)">ЛС 🔒</span>
+        `;
+        item.onclick = () => startDirectMessage(p);
+        container.appendChild(item);
+      });
+    }
+
+    function startDirectMessage(peer) {
+      if (!peer || !peer.public_key) return;
+      const dmChannel = 'dm:' + peer.public_key.substring(0, 58);
+      currentDmPeerPk = peer.public_key;
+      openDms.add(JSON.stringify({ channel: dmChannel, nick: peer.nickname, pk: peer.public_key }));
+      renderDmList();
+      switchDm(dmChannel, peer.nickname, peer.public_key);
+    }
+
+    function renderDmList() {
+      const container = document.getElementById('dm-container');
+      container.innerHTML = '';
+      if (openDms.size === 0) {
+        container.innerHTML = '<div style="font-size:12px; color:var(--text-muted); padding: 4px;">Нет открытых диалогов</div>';
+        return;
+      }
+      openDms.forEach(dmJson => {
+        const item = JSON.parse(dmJson);
+        const div = document.createElement('div');
+        div.className = 'channel-item' + (item.channel === currentChannel ? ' active' : '');
+        div.innerText = '🔒 ' + item.nick;
+        div.onclick = () => switchDm(item.channel, item.nick, item.pk);
+        container.appendChild(div);
+      });
+    }
+
+    function switchDm(dmChannel, nick, pk) {
+      currentChannel = dmChannel;
+      currentDmPeerPk = pk;
+      document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
+      renderDmList();
+      document.getElementById('active-channel-name').innerText = `🔒 ${nick}`;
+      document.getElementById('active-channel-topic').innerText = `| E2EE Private Channel`;
+      document.getElementById('msg-input').placeholder = `Личное сообщение для @${nick}...`;
+    }
+
+    function switchChannel(ch, elem) {
+      currentChannel = ch;
+      currentDmPeerPk = null;
+      document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
+      if (elem) elem.classList.add('active');
+      renderDmList();
+      document.getElementById('active-channel-name').innerText = ch;
+      document.getElementById('active-channel-topic').innerText = `| Sovereign P2P Swarm`;
+      document.getElementById('msg-input').placeholder = `Написать в #${ch}...`;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'switch_channel', name: ch }));
+      }
+    }
+
+    function createNewChannel() {
+      const name = prompt('Введите имя нового канала (например, offtopic, dev):');
+      if (name && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'create_channel', name: name.trim() }));
+      }
+    }
+
+    function handleFileUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) {
+        alert('Максимальный размер файла для P2P-передачи: 2 МБ');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const rawB64 = evt.target.result.split(',')[1];
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            action: 'upload_blob',
+            filename: file.name,
+            mime_type: file.type || 'application/octet-stream',
+            data_base64: rawB64
+          }));
+        }
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function downloadBlob(hash, filename, mimeType) {
+      if (blobCache[hash]) {
+        const a = document.createElement('a');
+        a.href = `data:${mimeType};base64,${blobCache[hash]}`;
+        a.download = filename;
+        a.click();
+      } else if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'get_blob', hash: hash }));
+        alert('Запрос файла из P2P-сети отправлен. Повторите загрузку через пару секунд.');
+      }
+    }
+
+    function appendMessage(msg) {
+      /* If message is for a specific DM, check matching */
+      const isDm = (msg.channel && msg.channel.startsWith('dm:'));
+      if (isDm && msg.channel !== currentChannel) {
+        /* Open DM tab if not already open */
+        const foundPeer = peersCache.find(p => p.public_key && msg.channel.includes(p.public_key.substring(0, 32)));
+        const nick = foundPeer ? foundPeer.nickname : msg.author;
+        const pk = foundPeer ? foundPeer.public_key : '';
+        openDms.add(JSON.stringify({ channel: msg.channel, nick: nick, pk: pk }));
+        renderDmList();
+      }
+
+      const feed = document.getElementById('messages');
+      const group = document.createElement('div');
+      group.className = 'msg-group';
+      if (msg.signature) {
+        group.id = 'msg-' + msg.signature;
+      }
+      
+      const timeStr = new Date(msg.timestamp_ms || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+      const initial = (msg.author || '?').charAt(0).toUpperCase();
+
+      /* Parse attachment tag: [attachment:hash:(key:)filename:size:mimetype] */
+      let bodyHtml = escapeHtml(msg.content);
+      const e2eeAttachMatch = msg.content.match(/\[attachment:([0-9a-f]{64}):([0-9a-f]{64}):([^:]+):([0-9]+):([^\]]+)\]/);
+      const plainAttachMatch = msg.content.match(/\[attachment:([0-9a-f]{64}):([^:]+):([0-9]+):([^\]]+)\]/);
+      
+      if (e2eeAttachMatch) {
+        const [_, hash, e2eeKey, fname, szStr, mtype] = e2eeAttachMatch;
+        const sizeNum = parseInt(szStr, 10);
+        bodyHtml = `
+          <a class="attachment-card" onclick="downloadBlob('${hash}', '${escapeHtml(fname)}', '${mtype}')" title="End-to-End Encrypted File">
+            <span>🔐</span> <span>${escapeHtml(fname)}</span>
+            <span style="font-size:10px; background:var(--accent); color:#fff; border-radius:3px; padding:1px 4px;">E2EE</span>
+            <span style="font-size:11px; color:var(--text-muted)">(${formatBytes(sizeNum)})</span>
+          </a>
+        `;
+      } else if (plainAttachMatch) {
+        const [_, hash, fname, szStr, mtype] = plainAttachMatch;
+        const sizeNum = parseInt(szStr, 10);
+        if (mtype.startsWith('image/')) {
+          bodyHtml = `
+            <div class="attachment-preview">
+              <img id="img-${hash}" alt="${escapeHtml(fname)}" style="display:none">
+            </div>
+            <a class="attachment-card" onclick="downloadBlob('${hash}', '${escapeHtml(fname)}', '${mtype}')">
+              <span>🖼️</span> <span>${escapeHtml(fname)}</span> <span style="font-size:11px;color:var(--text-muted)">(${formatBytes(sizeNum)})</span>
+            </a>
+          `;
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ action: 'get_blob', hash: hash }));
+          }
+        } else {
+          bodyHtml = `
+            <a class="attachment-card" onclick="downloadBlob('${hash}', '${escapeHtml(fname)}', '${mtype}')">
+              <span>📎</span> <span>${escapeHtml(fname)}</span> <span style="font-size:11px;color:var(--text-muted)">(${formatBytes(sizeNum)})</span>
+            </a>
+          `;
+        }
+      }
+      
+      const sigParam = msg.signature ? `'${msg.signature}'` : "''";
+      group.innerHTML = `
+        <div class="msg-avatar">${initial}</div>
+        <div class="msg-body">
+          <div class="msg-actions">
+            <button class="action-btn" title="Реакция 👍" onclick="sendReaction(${sigParam}, '👍')">👍</button>
+            <button class="action-btn" title="Реакция ❤️" onclick="sendReaction(${sigParam}, '❤️')">❤️</button>
+            <button class="action-btn" title="Реакция 🔥" onclick="sendReaction(${sigParam}, '🔥')">🔥</button>
+            <button class="action-btn" title="Редактировать" onclick="promptEditMessage(${sigParam})">✏️</button>
+            <button class="action-btn" title="Удалить" onclick="deleteMessage(${sigParam})">🗑️</button>
+          </div>
+          <div class="msg-meta">
+            <span class="msg-author">${msg.author}</span>
+            <span class="verified-badge">Ed25519</span>
+            ${isDm ? '<span class="e2ee-badge">🔒 E2EE DM</span>' : ''}
+            <span class="msg-time">${timeStr}</span>
+          </div>
+          <div class="msg-content" id="content-${msg.signature || ''}">${bodyHtml}</div>
+          <div class="reaction-bar" id="reacts-${msg.signature || ''}">${msg.reactions || ''}</div>
+        </div>
+      `;
+      feed.appendChild(group);
+      feed.scrollTop = feed.scrollHeight;
+    }
+
+    function escapeHtml(text) {
+      const d = document.createElement('div');
+      d.innerText = text;
+      return d.innerHTML;
+    }
+
+    function copyInvite() {
+      const link = `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}`;
+      navigator.clipboard.writeText(link);
+      alert('Инвайт скопирован! Друг может подключиться к вашему UDP порту:\n' + link);
+    }
+
+    function connectToPeerPrompt() {
+      const target = prompt('Введите IP:Port пира (например, 127.0.0.1:9002):');
+      if (target && target.includes(':')) {
+        const parts = target.split(':');
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            action: 'connect_peer',
+            ip: parts[0].trim(),
+            port: parseInt(parts[1].trim(), 10)
+          }));
+        }
+      }
+    }
+
+    function createNewSpace() {
+      const name = prompt('Введите имя нового сообщества:');
+      if (name && ws) {
+        ws.send(JSON.stringify({ action: 'create_space', name: name }));
+      }
+    }
+
+    document.getElementById('msg-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.value.trim() !== '') {
+        const text = e.target.value.trim();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          if (currentChannel.startsWith('dm:') && currentDmPeerPk) {
+            ws.send(JSON.stringify({
+              action: 'send_dm',
+              target_pk: currentDmPeerPk,
+              text: text
+            }));
+          } else {
+            ws.send(JSON.stringify({
+              action: 'send_message',
+              space_id: currentSpaceId,
+              channel: currentChannel,
+              text: text
+            }));
+          }
+          e.target.value = '';
+        }
+      }
+    });
+
+    function sendReaction(targetSig, emoji) {
+      if (!targetSig) return;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          action: 'send_reaction',
+          target_sig: targetSig,
+          emoji: emoji
+        }));
+      }
+    }
+
+    function promptEditMessage(targetSig) {
+      if (!targetSig) return;
+      const el = document.getElementById('content-' + targetSig);
+      const oldText = el ? el.innerText.replace(' (ред.)', '') : '';
+      const newText = prompt('Редактировать сообщение:', oldText);
+      if (newText !== null && newText.trim() !== '' && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          action: 'edit_message',
+          target_sig: targetSig,
+          text: newText.trim()
+        }));
+      }
+    }
+
+    function deleteMessage(targetSig) {
+      if (!targetSig) return;
+      if (confirm('Удалить это сообщение для всех?')) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            action: 'delete_message',
+            target_sig: targetSig
+          }));
+        }
+      }
+    }
+
+    let audioCtx = null;
+    let micStream = null;
+
+    async function toggleVoiceConnect(channel) {
+      if (voiceConnected) {
+        if (micStream) {
+          micStream.getTracks().forEach(t => t.stop());
+          micStream = null;
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ action: 'leave_voice' }));
+        }
+      } else {
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+          const source = audioCtx.createMediaStreamSource(micStream);
+          const processor = audioCtx.createScriptProcessor(1024, 1, 1);
+          source.connect(processor);
+          processor.connect(audioCtx.destination);
+          processor.onaudioprocess = (e) => {
+            if (!voiceConnected || !ws || ws.readyState !== WebSocket.OPEN) return;
+            const inputData = e.inputBuffer.getChannelData(0);
+            const pcm16 = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+              pcm16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+            }
+            const uint8 = new Uint8Array(pcm16.buffer);
+            let binary = '';
+            for (let i = 0; i < uint8.byteLength; i++) binary += String.fromCharCode(uint8[i]);
+            const b64 = btoa(binary);
+            ws.send(JSON.stringify({
+              action: 'voice_data',
+              channel: channel,
+              data_base64: b64
+            }));
+          };
+        } catch (err) {
+          console.warn('Микрофон недоступен, режим только прослушивания:', err);
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ action: 'join_voice', channel: channel }));
+        }
+      }
+    }
+
+    function playVoiceChunk(b64) {
+      if (!voiceConnected || !b64) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+        const binary = atob(b64);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+        const pcm16 = new Int16Array(bytes.buffer);
+        const floatData = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i++) floatData[i] = pcm16[i] / 32768.0;
+
+        const buffer = audioCtx.createBuffer(1, floatData.length, 48000);
+        buffer.getChannelData(0).set(floatData);
+        const srcNode = audioCtx.createBufferSource();
+        srcNode.buffer = buffer;
+        srcNode.connect(audioCtx.destination);
+        srcNode.start();
+      } catch (e) {
+        console.error('Audio playback error:', e);
+      }
+    }
+
+    function changeNodeUrl() {
+      const current = localStorage.getItem('wex_node_url') || '127.0.0.1:9000';
+      const val = prompt('Введите адрес демона Wex (например 127.0.0.1:9000 или 192.168.1.50:9000):', current);
+      if (val) {
+        localStorage.setItem('wex_node_url', val.trim());
+        location.reload();
+      }
+    }
+
+    connectWS();
+  </script>
+</body>
+</html>
