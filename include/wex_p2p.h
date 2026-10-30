@@ -4,6 +4,7 @@
 #include "wex_models.h"
 #include "wex_dht.h"
 #include "wex_persist.h"
+#include "wex_blob.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -34,7 +35,10 @@ typedef enum {
     WEX_PKT_OVERLAY_RELAY = 0x32, /* Transit overlay multi-hop relay */
     WEX_PKT_DHT_ANNOUNCE  = 0x33, /* Announce topic provider to DHT */
     WEX_PKT_DHT_GET_PROVIDERS = 0x34, /* Query providers for topic from DHT */
-    WEX_PKT_DHT_PROVIDERS = 0x35  /* Response with topic providers */
+    WEX_PKT_DHT_PROVIDERS = 0x35, /* Response with topic providers */
+    WEX_PKT_BLOB_OFFER    = 0x40, /* Announce available file/blob in swarm */
+    WEX_PKT_BLOB_REQ      = 0x41, /* Request specific chunk of a blob */
+    WEX_PKT_BLOB_CHUNK    = 0x42  /* Chunk payload delivery */
 } wex_pkt_type_t;
 
 /* Binary header on the wire */
@@ -62,6 +66,7 @@ typedef struct {
 typedef void (*wex_on_msg_fn)(const wex_chat_msg_t *msg, void *user_data);
 typedef void (*wex_on_peer_fn)(const wex_peer_t *peer, bool joined, void *user_data);
 typedef size_t (*wex_on_sync_req_fn)(const uint8_t space_id[32], const char *channel, wex_chat_msg_t out_msgs[], size_t max_msgs, void *user_data);
+typedef void (*wex_on_blob_fn)(const wex_blob_info_t *info, const uint8_t *data, void *user_data);
 
 /* P2P Node Engine */
 typedef struct {
@@ -73,6 +78,7 @@ typedef struct {
     size_t peer_count;
     uint8_t active_space_id[32];
     char active_channel[WEX_NAME_LEN];
+    char data_dir[512];
 
     /* Multi-space and multi-channel registry */
     wex_space_t spaces[WEX_MAX_SPACES];
@@ -88,6 +94,11 @@ typedef struct {
     struct sockaddr_in external_addr;
     bool has_external_addr;
 
+    /* Active blob transfer state */
+    wex_blob_assembler_t active_download;
+    struct sockaddr_in download_peer;
+    bool is_downloading;
+
     /* Iterative DHT Lookups */
     wex_dht_lookup_t active_lookups[4];
     size_t lookup_count;
@@ -96,6 +107,7 @@ typedef struct {
     wex_on_msg_fn msg_cb;
     wex_on_peer_fn peer_cb;
     wex_on_sync_req_fn sync_cb;
+    wex_on_blob_fn blob_cb;
     void *user_data;
 } wex_p2p_node_t;
 
@@ -107,6 +119,18 @@ void wex_p2p_set_callbacks(wex_p2p_node_t *node, wex_on_msg_fn msg_cb, wex_on_pe
 
 /* Set sync provider callback */
 void wex_p2p_set_sync_callback(wex_p2p_node_t *node, wex_on_sync_req_fn sync_cb);
+
+/* Set blob download completion callback */
+void wex_p2p_set_blob_callback(wex_p2p_node_t *node, wex_on_blob_fn blob_cb);
+
+/* Set data directory for blob storage */
+void wex_p2p_set_data_dir(wex_p2p_node_t *node, const char *data_dir);
+
+/* Blob P2P Transfer API */
+int wex_p2p_offer_blob(wex_p2p_node_t *node, const wex_blob_info_t *info);
+int wex_p2p_download_blob(wex_p2p_node_t *node, const struct sockaddr_in *peer_addr, const wex_blob_info_t *info);
+int wex_p2p_request_blob_chunk(wex_p2p_node_t *node, const struct sockaddr_in *target_addr, const uint8_t root_hash[32], uint32_t chunk_idx);
+int wex_p2p_send_blob_chunk(wex_p2p_node_t *node, const struct sockaddr_in *target_addr, const uint8_t root_hash[32], uint32_t chunk_idx, uint32_t total_chunks, const uint8_t *data, size_t len);
 
 /* Attach open persistence journal to automatically save incoming/outgoing messages */
 void wex_p2p_set_journal(wex_p2p_node_t *node, wex_journal_t *journal);

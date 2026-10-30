@@ -34,6 +34,7 @@ set(WEX_CORE_SOURCES
     src/net/wex_nat.c
     src/storage/wex_store.c
     src/storage/wex_persist.c
+    src/storage/wex_blob.c
     src/dht/wex_dht.c
 )
 
@@ -81,3 +82,7 @@ add_test(NAME test_spaces_channels COMMAND test_spaces_channels)
 add_executable(test_seed_relay tests/test_seed_relay.c)
 target_link_libraries(test_seed_relay wex_core)
 add_test(NAME test_seed_relay COMMAND test_seed_relay)
+
+add_executable(test_blob tests/test_blob.c)
+target_link_libraries(test_blob wex_core)
+add_test(NAME test_blob COMMAND test_blob)

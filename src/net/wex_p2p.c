@@ -35,6 +35,7 @@ int wex_p2p_init(wex_p2p_node_t *node, wex_identity_t *ident, int udp_port) {
     node->port = udp_port;
     node->udp_fd = -1;
     strncpy(node->active_channel, "general", sizeof(node->active_channel) - 1);
+    strncpy(node->data_dir, "./.wex_data", sizeof(node->data_dir) - 1);
 
     /* Initialize Kademlia DHT routing table */
     wex_dht_init(&node->dht, ident->sign_pk);
@@ -83,6 +84,111 @@ void wex_p2p_set_sync_callback(wex_p2p_node_t *node, wex_on_sync_req_fn sync_cb)
 void wex_p2p_set_journal(wex_p2p_node_t *node, wex_journal_t *journal) {
     if (!node) return;
     node->journal = journal;
+}
+
+void wex_p2p_set_blob_callback(wex_p2p_node_t *node, wex_on_blob_fn blob_cb) {
+    if (!node) return;
+    node->blob_cb = blob_cb;
+}
+
+void wex_p2p_set_data_dir(wex_p2p_node_t *node, const char *data_dir) {
+    if (!node || !data_dir) return;
+    strncpy(node->data_dir, data_dir, sizeof(node->data_dir) - 1);
+    node->data_dir[sizeof(node->data_dir) - 1] = '\0';
+}
+
+int wex_p2p_offer_blob(wex_p2p_node_t *node, const wex_blob_info_t *info) {
+    if (!node || node->udp_fd < 0 || !info) return -1;
+
+    uint8_t buffer[sizeof(wex_pkt_hdr_t) + sizeof(wex_blob_info_t)];
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    hdr->magic = htonl(WEX_P2P_MAGIC);
+    hdr->type = WEX_PKT_BLOB_OFFER;
+    memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
+    memcpy(hdr->space_id, node->active_space_id, 32);
+    hdr->payload_len = htons((uint16_t)sizeof(wex_blob_info_t));
+    memcpy(buffer + sizeof(wex_pkt_hdr_t), info, sizeof(wex_blob_info_t));
+
+    int sent = 0;
+    for (size_t i = 0; i < node->peer_count; i++) {
+        if (node->peers[i].active) {
+            ssize_t s = sendto(node->udp_fd, buffer, sizeof(buffer), 0,
+                               (struct sockaddr *)&node->peers[i].addr, sizeof(node->peers[i].addr));
+            if (s == (ssize_t)sizeof(buffer)) sent++;
+        }
+    }
+    return sent;
+}
+
+int wex_p2p_request_blob_chunk(wex_p2p_node_t *node, const struct sockaddr_in *target_addr,
+                               const uint8_t root_hash[32], uint32_t chunk_idx) {
+    if (!node || node->udp_fd < 0 || !target_addr || !root_hash) return -1;
+
+    uint8_t buffer[sizeof(wex_pkt_hdr_t) + 36];
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    hdr->magic = htonl(WEX_P2P_MAGIC);
+    hdr->type = WEX_PKT_BLOB_REQ;
+    memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
+    memcpy(hdr->space_id, node->active_space_id, 32);
+    hdr->payload_len = htons(36);
+
+    uint8_t *payload = buffer + sizeof(wex_pkt_hdr_t);
+    memcpy(payload, root_hash, 32);
+    uint32_t net_idx = htonl(chunk_idx);
+    memcpy(payload + 32, &net_idx, 4);
+
+    ssize_t s = sendto(node->udp_fd, buffer, sizeof(buffer), 0,
+                       (struct sockaddr *)target_addr, sizeof(*target_addr));
+    return (s == (ssize_t)sizeof(buffer)) ? 0 : -1;
+}
+
+int wex_p2p_download_blob(wex_p2p_node_t *node, const struct sockaddr_in *peer_addr, const wex_blob_info_t *info) {
+    if (!node || !peer_addr || !info) return -1;
+
+    if (node->is_downloading) {
+        wex_blob_assembler_free(&node->active_download);
+    }
+
+    if (wex_blob_assembler_init(&node->active_download, info) != 0) {
+        return -1;
+    }
+
+    node->download_peer = *peer_addr;
+    node->is_downloading = true;
+
+    /* Request first chunk */
+    return wex_p2p_request_blob_chunk(node, peer_addr, info->root_hash, 0);
+}
+
+int wex_p2p_send_blob_chunk(wex_p2p_node_t *node, const struct sockaddr_in *target_addr,
+                            const uint8_t root_hash[32], uint32_t chunk_idx, uint32_t total_chunks,
+                            const uint8_t *data, size_t len) {
+    if (!node || node->udp_fd < 0 || !target_addr || !root_hash || len > WEX_BLOB_CHUNK_SIZE) return -1;
+
+    uint8_t buffer[sizeof(wex_pkt_hdr_t) + sizeof(wex_blob_chunk_hdr_t) + WEX_BLOB_CHUNK_SIZE];
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    hdr->magic = htonl(WEX_P2P_MAGIC);
+    hdr->type = WEX_PKT_BLOB_CHUNK;
+    memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
+    memcpy(hdr->space_id, node->active_space_id, 32);
+
+    uint8_t *payload = buffer + sizeof(wex_pkt_hdr_t);
+    wex_blob_chunk_hdr_t *chdr = (wex_blob_chunk_hdr_t *)payload;
+    memcpy(chdr->root_hash, root_hash, 32);
+    chdr->chunk_idx = htonl(chunk_idx);
+    chdr->total_chunks = htonl(total_chunks);
+    chdr->data_len = htons((uint16_t)len);
+
+    if (len > 0 && data) {
+        memcpy(payload + sizeof(wex_blob_chunk_hdr_t), data, len);
+    }
+
+    size_t payload_len = sizeof(wex_blob_chunk_hdr_t) + len;
+    hdr->payload_len = htons((uint16_t)payload_len);
+
+    ssize_t s = sendto(node->udp_fd, buffer, sizeof(wex_pkt_hdr_t) + payload_len, 0,
+                       (struct sockaddr *)target_addr, sizeof(*target_addr));
+    return (s == (ssize_t)(sizeof(wex_pkt_hdr_t) + payload_len)) ? 0 : -1;
 }
 
 wex_space_t *wex_p2p_get_active_space(wex_p2p_node_t *node) {
@@ -1030,6 +1136,72 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
             break;
         }
 
+        case WEX_PKT_BLOB_OFFER: {
+            if (payload_len < sizeof(wex_blob_info_t)) break;
+            wex_blob_info_t binfo;
+            memcpy(&binfo, payload, sizeof(wex_blob_info_t));
+
+            if (node->blob_cb) {
+                node->blob_cb(&binfo, NULL, node->user_data);
+            }
+            break;
+        }
+
+        case WEX_PKT_BLOB_REQ: {
+            if (payload_len < 36) break;
+            uint8_t req_hash[32];
+            memcpy(req_hash, payload, 32);
+            uint32_t net_idx = 0;
+            memcpy(&net_idx, payload + 32, sizeof(net_idx));
+            uint32_t chunk_idx = ntohl(net_idx);
+
+            uint8_t *blob_data = NULL;
+            size_t blob_sz = 0;
+            if (wex_blob_load(node->data_dir, req_hash, &blob_data, &blob_sz) == 0) {
+                uint32_t total_chunks = (blob_sz == 0) ? 1 : (uint32_t)((blob_sz + WEX_BLOB_CHUNK_SIZE - 1) / WEX_BLOB_CHUNK_SIZE);
+                size_t offset = (size_t)chunk_idx * WEX_BLOB_CHUNK_SIZE;
+                if (offset <= blob_sz) {
+                    size_t rem = blob_sz - offset;
+                    size_t chunk_len = (rem > WEX_BLOB_CHUNK_SIZE) ? WEX_BLOB_CHUNK_SIZE : rem;
+                    wex_p2p_send_blob_chunk(node, &src_addr, req_hash, chunk_idx, total_chunks, blob_data + offset, chunk_len);
+                }
+                free(blob_data);
+            }
+            break;
+        }
+
+        case WEX_PKT_BLOB_CHUNK: {
+            if (payload_len < sizeof(wex_blob_chunk_hdr_t)) break;
+            wex_blob_chunk_hdr_t chdr;
+            memcpy(&chdr, payload, sizeof(wex_blob_chunk_hdr_t));
+            uint32_t c_idx = ntohl(chdr.chunk_idx);
+            uint16_t d_len = ntohs(chdr.data_len);
+            if (payload_len < sizeof(wex_blob_chunk_hdr_t) + d_len) break;
+
+            const uint8_t *c_data = payload + sizeof(wex_blob_chunk_hdr_t);
+
+            if (node->is_downloading && memcmp(chdr.root_hash, node->active_download.info.root_hash, 32) == 0) {
+                bool complete = wex_blob_assembler_put_chunk(&node->active_download, c_idx, c_data, d_len);
+                if (complete) {
+                    node->is_downloading = false;
+                    wex_blob_save(node->data_dir, &node->active_download.info, node->active_download.data);
+                    if (node->blob_cb) {
+                        node->blob_cb(&node->active_download.info, node->active_download.data, node->user_data);
+                    }
+                    wex_blob_assembler_free(&node->active_download);
+                } else {
+                    /* Request next missing chunk */
+                    for (uint32_t i = 0; i < node->active_download.info.total_chunks; i++) {
+                        if (!node->active_download.chunk_received[i]) {
+                            wex_p2p_request_blob_chunk(node, &src_addr, chdr.root_hash, i);
+                            break;
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
         default:
             break;
     }
@@ -1039,6 +1211,10 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
 
 void wex_p2p_close(wex_p2p_node_t *node) {
     if (!node) return;
+    if (node->is_downloading) {
+        wex_blob_assembler_free(&node->active_download);
+        node->is_downloading = false;
+    }
     if (node->udp_fd >= 0) {
         close(node->udp_fd);
         node->udp_fd = -1;
