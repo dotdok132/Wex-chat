@@ -10,9 +10,19 @@ import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
 import android.webkit.PermissionRequest;
 import android.graphics.Color;
+import java.io.File;
 
 public class MainActivity extends Activity {
+    static {
+        System.loadLibrary("wex");
+    }
+
+    public native int startNativeDaemon(String dataDir, int wsPort, int udpPort, String nickname, String bootstrap);
+    public native void stopNativeDaemon();
+    public native boolean isNativeDaemonRunning();
+
     private WebView webView;
+    private static boolean daemonStarted = false;
 
     private static class WexChromeClient extends WebChromeClient {
         @Override
@@ -26,6 +36,17 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Start embedded C99 Wex P2P Daemon in background thread
+        if (!daemonStarted) {
+            File filesDir = getFilesDir();
+            File dataDir = new File(filesDir, ".wex_data");
+            if (!dataDir.exists()) {
+                dataDir.mkdirs();
+            }
+            startNativeDaemon(dataDir.getAbsolutePath(), 9000, 9001, "AndroidPeer", "");
+            daemonStarted = true;
+        }
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#313338"));
@@ -57,6 +78,15 @@ public class MainActivity extends Activity {
             webView.goBack();
         } else {
             super.onBackPressed();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (isFinishing()) {
+            stopNativeDaemon();
+            daemonStarted = false;
         }
     }
 }

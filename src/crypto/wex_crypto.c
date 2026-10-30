@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "wex_crypto.h"
 #include "../../vendor/monocypher/monocypher.h"
 
@@ -9,7 +10,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#if defined(__linux__)
+#if defined(__ANDROID__)
+#include <sys/random.h>
+#if __ANDROID_API__ < 28
+extern ssize_t getrandom(void *buf, size_t buflen, unsigned int flags);
+#endif
+#elif defined(__linux__)
 #include <sys/random.h>
 #endif
 
