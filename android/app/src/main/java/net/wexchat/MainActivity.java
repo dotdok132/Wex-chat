@@ -2,11 +2,17 @@ package net.wexchat;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.os.Bundle;
 import android.os.Build;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.view.Window;
+import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import android.webkit.WebSettings;
 import android.webkit.WebViewClient;
@@ -21,6 +27,46 @@ import java.util.List;
 
 public class MainActivity extends Activity {
     private WebView webView;
+
+    public static class WexAndroidBridge {
+        private final Context ctx;
+
+        public WexAndroidBridge(Context ctx) {
+            this.ctx = ctx;
+        }
+
+        @JavascriptInterface
+        public void copyText(String text) {
+            if (text == null) return;
+            ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null) {
+                cm.setPrimaryClip(ClipData.newPlainText("Wex-Chat", text));
+            }
+        }
+
+        @JavascriptInterface
+        public String pasteText() {
+            ClipboardManager cm = (ClipboardManager) ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+            if (cm != null && cm.hasPrimaryClip()) {
+                ClipData clip = cm.getPrimaryClip();
+                if (clip != null && clip.getItemCount() > 0 && clip.getItemAt(0).getText() != null) {
+                    return clip.getItemAt(0).getText().toString();
+                }
+            }
+            return "";
+        }
+
+        @JavascriptInterface
+        public void shareText(String text) {
+            if (text == null) return;
+            Intent sendIntent = new Intent(Intent.ACTION_SEND);
+            sendIntent.putExtra(Intent.EXTRA_TEXT, text);
+            sendIntent.setType("text/plain");
+            Intent shareIntent = Intent.createChooser(sendIntent, "Поделиться инвайтом Wex-Chat");
+            shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(shareIntent);
+        }
+    }
 
     private static class WexChromeClient extends WebChromeClient {
         @Override
@@ -76,6 +122,15 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            Window window = getWindow();
+            window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+            window.setStatusBarColor(Color.parseColor("#1e1f22"));
+            window.setNavigationBarColor(Color.parseColor("#1e1f22"));
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
+
         // Start C99 Wex P2P Engine inside an unkillable Android Foreground Service
         Intent serviceIntent = new Intent(this, WexService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -93,9 +148,12 @@ public class MainActivity extends Activity {
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(true);
         s.setAllowContentAccess(true);
+        s.setAllowFileAccessFromFileURLs(true);
+        s.setAllowUniversalAccessFromFileURLs(true);
         s.setDatabaseEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
 
+        webView.addJavascriptInterface(new WexAndroidBridge(this), "AndroidBridge");
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WexChromeClient());
 
@@ -120,8 +178,20 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
+        if (webView != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            webView.evaluateJavascript(
+                "(function(){" +
+                "  var m = document.querySelector('.modal-overlay.open');" +
+                "  if (m) { closeModals(); return 'handled'; }" +
+                "  if (document.body.classList.contains('drawer-open')) { toggleMobileDrawer(false); return 'handled'; }" +
+                "  return 'exit';" +
+                "})()",
+                value -> {
+                    if (value == null || !value.contains("handled")) {
+                        MainActivity.super.onBackPressed();
+                    }
+                }
+            );
         } else {
             super.onBackPressed();
         }
