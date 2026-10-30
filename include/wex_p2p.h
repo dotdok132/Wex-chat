@@ -71,7 +71,18 @@ typedef struct {
     uint64_t last_seen_ms;
     bool active;
     bool synced;                    /* True if history was requested */
+    bool use_relay;                 /* Fallback to multi-hop DHT relay when Symmetric NAT blocks direct UDP */
 } wex_peer_t;
+
+#define WEX_MAX_PUNCH_TRACK 16
+typedef struct {
+    uint8_t target_pk[32];
+    uint64_t punch_started_ms;
+    struct sockaddr_in rendezvous_addr;
+    bool active;
+    bool direct_success;
+    bool relay_fallback;
+} wex_punch_tracker_t;
 
 /* Callback types */
 typedef void (*wex_on_msg_fn)(const wex_chat_msg_t *msg, void *user_data);
@@ -117,6 +128,10 @@ typedef struct {
     /* Pending peer public key lookup for auto-connect/punch */
     uint8_t pending_connect_pk[32];
     bool has_pending_connect_pk;
+
+    /* Symmetric NAT traversal & automated relay fallback trackers */
+    wex_punch_tracker_t punch_trackers[WEX_MAX_PUNCH_TRACK];
+    size_t punch_tracker_count;
 
     /* Active blob transfer state */
     wex_blob_assembler_t active_download;

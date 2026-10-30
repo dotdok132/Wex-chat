@@ -152,6 +152,16 @@ Java_net_wexchat_MainActivity_startNativeDaemon(JNIEnv *env, jobject thiz,
     return 0;
 }
 
+JNIEXPORT jint JNICALL
+Java_net_wexchat_WexService_startNativeDaemon(JNIEnv *env, jobject thiz,
+                                              jstring jDataDir,
+                                              jint wsPort,
+                                              jint udpPort,
+                                              jstring jNickname,
+                                              jstring jBootstrap) {
+    return Java_net_wexchat_MainActivity_startNativeDaemon(env, thiz, jDataDir, wsPort, udpPort, jNickname, jBootstrap);
+}
+
 JNIEXPORT void JNICALL
 Java_net_wexchat_MainActivity_stopNativeDaemon(JNIEnv *env, jobject thiz) {
     (void)env;
@@ -162,9 +172,19 @@ Java_net_wexchat_MainActivity_stopNativeDaemon(JNIEnv *env, jobject thiz) {
     }
 }
 
+JNIEXPORT void JNICALL
+Java_net_wexchat_WexService_stopNativeDaemon(JNIEnv *env, jobject thiz) {
+    Java_net_wexchat_MainActivity_stopNativeDaemon(env, thiz);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_net_wexchat_MainActivity_isNativeDaemonRunning(JNIEnv *env, jobject thiz) {
     (void)env;
     (void)thiz;
     return s_thread_running ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_net_wexchat_WexService_isNativeDaemonRunning(JNIEnv *env, jobject thiz) {
+    return Java_net_wexchat_MainActivity_isNativeDaemonRunning(env, thiz);
 }

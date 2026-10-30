@@ -3,6 +3,7 @@ package net.wexchat;
 import android.app.Activity;
 import android.os.Bundle;
 import android.os.Build;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.webkit.WebView;
 import android.webkit.WebSettings;
@@ -10,19 +11,11 @@ import android.webkit.WebViewClient;
 import android.webkit.WebChromeClient;
 import android.webkit.PermissionRequest;
 import android.graphics.Color;
-import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends Activity {
-    static {
-        System.loadLibrary("wex");
-    }
-
-    public native int startNativeDaemon(String dataDir, int wsPort, int udpPort, String nickname, String bootstrap);
-    public native void stopNativeDaemon();
-    public native boolean isNativeDaemonRunning();
-
     private WebView webView;
-    private static boolean daemonStarted = false;
 
     private static class WexChromeClient extends WebChromeClient {
         @Override
@@ -37,15 +30,12 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Start embedded C99 Wex P2P Daemon in background thread
-        if (!daemonStarted) {
-            File filesDir = getFilesDir();
-            File dataDir = new File(filesDir, ".wex_data");
-            if (!dataDir.exists()) {
-                dataDir.mkdirs();
-            }
-            startNativeDaemon(dataDir.getAbsolutePath(), 9000, 9001, "AndroidPeer", "");
-            daemonStarted = true;
+        // Start C99 Wex P2P Engine inside an unkillable Android Foreground Service
+        Intent serviceIntent = new Intent(this, WexService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
         }
 
         webView = new WebView(this);
@@ -63,9 +53,19 @@ public class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WexChromeClient());
 
+        // Check runtime permissions for mic and push notifications
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            List<String> perms = new ArrayList<String>();
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 101);
+                perms.add(android.Manifest.permission.RECORD_AUDIO);
+            }
+            if (Build.VERSION.SDK_INT >= 33) {
+                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                    perms.add("android.permission.POST_NOTIFICATIONS");
+                }
+            }
+            if (!perms.isEmpty()) {
+                requestPermissions(perms.toArray(new String[0]), 101);
             }
         }
 
@@ -78,15 +78,6 @@ public class MainActivity extends Activity {
             webView.goBack();
         } else {
             super.onBackPressed();
-        }
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (isFinishing()) {
-            stopNativeDaemon();
-            daemonStarted = false;
         }
     }
 }

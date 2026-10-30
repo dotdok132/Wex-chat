@@ -343,6 +343,14 @@ static wex_peer_t *find_or_add_peer(wex_p2p_node_t *node, const struct sockaddr_
             }
             node->peers[i].last_seen_ms = get_time_ms();
             node->peers[i].active = true;
+            node->peers[i].use_relay = false; /* direct route established */
+
+            /* Mark direct hole punch success in trackers */
+            for (size_t pt = 0; pt < node->punch_tracker_count; pt++) {
+                if (node->punch_trackers[pt].active && memcmp(node->punch_trackers[pt].target_pk, pk, 32) == 0) {
+                    node->punch_trackers[pt].direct_success = true;
+                }
+            }
             return &node->peers[i];
         }
     }
@@ -364,6 +372,13 @@ static wex_peer_t *find_or_add_peer(wex_p2p_node_t *node, const struct sockaddr_
         p->last_seen_ms = get_time_ms();
         p->active = true;
         p->synced = false;
+        p->use_relay = false;
+
+        for (size_t pt = 0; pt < node->punch_tracker_count; pt++) {
+            if (node->punch_trackers[pt].active && memcmp(node->punch_trackers[pt].target_pk, pk, 32) == 0) {
+                node->punch_trackers[pt].direct_success = true;
+            }
+        }
         return p;
     }
     return NULL;
@@ -756,10 +771,16 @@ int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg) {
     int sent_count = 0;
     for (size_t i = 0; i < node->peer_count; i++) {
         if (node->peers[i].active) {
-            ssize_t s = sendto(node->udp_fd, buffer, total_len, 0,
-                               (struct sockaddr *)&node->peers[i].addr, sizeof(node->peers[i].addr));
-            if (s == (ssize_t)total_len) {
-                sent_count++;
+            if (node->peers[i].use_relay) {
+                if (wex_p2p_relay_msg(node, node->peers[i].pk, msg) == 0) {
+                    sent_count++;
+                }
+            } else {
+                ssize_t s = sendto(node->udp_fd, buffer, total_len, 0,
+                                   (struct sockaddr *)&node->peers[i].addr, sizeof(node->peers[i].addr));
+                if (s == (ssize_t)total_len) {
+                    sent_count++;
+                }
             }
         }
     }
@@ -888,6 +909,29 @@ int wex_p2p_send_find_node(wex_p2p_node_t *node, const struct sockaddr_in *targe
 int wex_p2p_punch_hole(wex_p2p_node_t *node, const struct sockaddr_in *rendezvous_addr, const uint8_t target_pk[32]) {
     if (!node || node->udp_fd < 0 || !rendezvous_addr || !target_pk) return -1;
 
+    /* Track hole punch attempt for automated Symmetric NAT Relay Fallback */
+    bool recorded = false;
+    uint64_t now_ms = get_time_ms();
+    for (size_t i = 0; i < node->punch_tracker_count; i++) {
+        if (node->punch_trackers[i].active && memcmp(node->punch_trackers[i].target_pk, target_pk, 32) == 0) {
+            node->punch_trackers[i].punch_started_ms = now_ms;
+            node->punch_trackers[i].rendezvous_addr = *rendezvous_addr;
+            node->punch_trackers[i].direct_success = false;
+            node->punch_trackers[i].relay_fallback = false;
+            recorded = true;
+            break;
+        }
+    }
+    if (!recorded && node->punch_tracker_count < WEX_MAX_PUNCH_TRACK) {
+        wex_punch_tracker_t *t = &node->punch_trackers[node->punch_tracker_count++];
+        memcpy(t->target_pk, target_pk, 32);
+        t->punch_started_ms = now_ms;
+        t->rendezvous_addr = *rendezvous_addr;
+        t->active = true;
+        t->direct_success = false;
+        t->relay_fallback = false;
+    }
+
     uint8_t buffer[sizeof(wex_pkt_hdr_t) + 32];
     wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
     hdr->magic = htonl(WEX_P2P_MAGIC);
@@ -1006,6 +1050,39 @@ void wex_p2p_maintain(wex_p2p_node_t *node, uint64_t now_ms) {
         }
     }
     node->lookup_count = active_idx;
+
+    /* Check Symmetric NAT punch timeouts & activate automated Relay Fallback */
+    for (size_t i = 0; i < node->punch_tracker_count; i++) {
+        wex_punch_tracker_t *pt = &node->punch_trackers[i];
+        if (pt->active && !pt->direct_success && !pt->relay_fallback) {
+            if (now_ms - pt->punch_started_ms > 3000) {
+                pt->relay_fallback = true;
+                bool found = false;
+                for (size_t p = 0; p < node->peer_count; p++) {
+                    if (memcmp(node->peers[p].pk, pt->target_pk, 32) == 0) {
+                        node->peers[p].use_relay = true;
+                        node->peers[p].active = true;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && node->peer_count < WEX_MAX_PEERS) {
+                    wex_peer_t *p = &node->peers[node->peer_count++];
+                    p->addr = pt->rendezvous_addr;
+                    memcpy(p->pk, pt->target_pk, 32);
+                    crypto_eddsa_to_x25519(p->x25519_pk, pt->target_pk);
+                    strncpy(p->nickname, "Peer (Relayed)", sizeof(p->nickname) - 1);
+                    p->last_seen_ms = now_ms;
+                    p->active = true;
+                    p->synced = false;
+                    p->use_relay = true;
+                    if (node->peer_cb) {
+                        node->peer_cb(p, true, node->user_data);
+                    }
+                }
+            }
+        }
+    }
 
     /* Purge expired Quas Store-and-Forward items */
     wex_store_purge_expired(&node->offline_store, now_ms);
@@ -1226,7 +1303,7 @@ int wex_p2p_send_dm(wex_p2p_node_t *node, const uint8_t target_pk[32], const cha
         if (node->peers[i].active && memcmp(node->peers[i].pk, target_pk, 32) == 0) {
             memcpy(target_x25519, node->peers[i].x25519_pk, 32);
             target_addr = node->peers[i].addr;
-            found_peer = true;
+            found_peer = !node->peers[i].use_relay; /* if use_relay is true, force relay */
             break;
         }
     }

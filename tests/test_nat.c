@@ -213,6 +213,82 @@ static void test_coordinated_nat_hole_punch(void) {
     wex_p2p_close(&node_b);
 }
 
+static void test_symmetric_nat_relay_fallback(void) {
+    wex_identity_t id_r, id_a, id_b;
+    assert(wex_identity_init(&id_r, NULL, "Seed_Relay") == 0);
+    assert(wex_identity_init(&id_a, NULL, "Alice_SymmetricNAT") == 0);
+    assert(wex_identity_init(&id_b, NULL, "Bob_SymmetricNAT") == 0);
+
+    wex_p2p_node_t node_r, node_a, node_b;
+    assert(wex_p2p_init(&node_r, &id_r, 31101) == 0);
+    assert(wex_p2p_init(&node_a, &id_a, 31102) == 0);
+    assert(wex_p2p_init(&node_b, &id_b, 31103) == 0);
+
+    nat_sink_t sink_b = {0};
+    wex_p2p_set_callbacks(&node_b, on_nat_test_msg, NULL, &sink_b);
+
+    /* Both connect to Seed/Relay */
+    assert(wex_p2p_connect(&node_a, "127.0.0.1", 31101) == 0);
+    assert(wex_p2p_connect(&node_b, "127.0.0.1", 31101) == 0);
+
+    for (int t = 0; t < 15; t++) {
+        wex_p2p_poll(&node_r, 5);
+        wex_p2p_poll(&node_a, 5);
+        wex_p2p_poll(&node_b, 5);
+        usleep(3000);
+    }
+
+    struct sockaddr_in r_addr;
+    memset(&r_addr, 0, sizeof(r_addr));
+    r_addr.sin_family = AF_INET;
+    r_addr.sin_port = htons(31101);
+    inet_pton(AF_INET, "127.0.0.1", &r_addr.sin_addr);
+
+    /* Alice initiates punch to Bob */
+    assert(wex_p2p_punch_hole(&node_a, &r_addr, id_b.sign_pk) == 0);
+    assert(node_a.punch_tracker_count == 1);
+
+    /* Simulate 3.5s timeout where direct UDP was blocked by Symmetric NAT firewall */
+    wex_p2p_maintain(&node_a, node_a.punch_trackers[0].punch_started_ms + 3500);
+
+    /* Automated Relay Fallback should be triggered */
+    assert(node_a.punch_trackers[0].relay_fallback == true);
+
+    bool b_relayed = false;
+    for (size_t i = 0; i < node_a.peer_count; i++) {
+        if (memcmp(node_a.peers[i].pk, id_b.sign_pk, 32) == 0) {
+            assert(node_a.peers[i].use_relay == true);
+            b_relayed = true;
+            break;
+        }
+    }
+    assert(b_relayed == true);
+
+    /* Alice sends message to Bob - should seamlessly route via Seed/Relay */
+    wex_chat_msg_t chat;
+    memset(&chat, 0, sizeof(chat));
+    strncpy(chat.channel, "general", 31);
+    strncpy(chat.content, "Automated Symmetric NAT Relay Fallback succeeded!", WEX_MAX_MSG_LEN - 1);
+    assert(wex_chat_msg_sign(&chat, &id_a) == 0);
+
+    assert(wex_p2p_broadcast_msg(&node_a, &chat) >= 1);
+
+    for (int t = 0; t < 20; t++) {
+        wex_p2p_poll(&node_r, 5);
+        wex_p2p_poll(&node_b, 5);
+        usleep(3000);
+    }
+
+    assert(sink_b.received == 1);
+    assert(strcmp(sink_b.text, "Automated Symmetric NAT Relay Fallback succeeded!") == 0);
+
+    wex_p2p_close(&node_r);
+    wex_p2p_close(&node_a);
+    wex_p2p_close(&node_b);
+
+    TEST_PASS("Automated Symmetric NAT Relay Fallback (timeout -> seamless multi-hop relay)");
+}
+
 int main(void) {
     printf("====================================================\n");
     printf("  Running Wex NAT Traversal & STUN Tests            \n");
@@ -222,6 +298,7 @@ int main(void) {
     test_local_mock_stun();
     test_live_stun_if_available();
     test_coordinated_nat_hole_punch();
+    test_symmetric_nat_relay_fallback();
 
     printf("====================================================\n");
     printf("  ALL NAT & STUN TESTS PASSED SUCCESSFULLY!         \n");

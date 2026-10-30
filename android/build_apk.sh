@@ -79,7 +79,7 @@ javac -g -source 8 -target 8 \
     -cp "$PLATFORM" \
     -d "$BUILD_DIR/classes" \
     "$BUILD_DIR/gen/net/wexchat/R.java" \
-    "$ROOT_DIR/app/src/main/java/net/wexchat/MainActivity.java"
+    "$ROOT_DIR/app/src/main/java/net/wexchat/"*.java
 
 echo "[*] Converting bytecode to Dalvik DEX via D8..."
 "$D8" --lib "$PLATFORM" --output "$BUILD_DIR/dex" "$BUILD_DIR/classes/net/wexchat/"*.class
