@@ -42,6 +42,10 @@ int wex_identity_init(wex_identity_t *ident, const uint8_t *seed, const char *ni
     /* Derive Ed25519 keypair from seed */
     crypto_ed25519_key_pair(ident->sign_sk, ident->sign_pk, ident->seed);
 
+    /* Derive X25519 keypair from seed */
+    crypto_blake2b_keyed(ident->x25519_sk, 32, (const uint8_t *)"WEX_X25519_KEY_v1", 17, ident->seed, 32);
+    crypto_x25519_public_key(ident->x25519_pk, ident->x25519_sk);
+
     if (nickname && strlen(nickname) > 0) {
         strncpy(ident->nickname, nickname, sizeof(ident->nickname) - 1);
         ident->nickname[sizeof(ident->nickname) - 1] = '\0';
@@ -59,6 +63,9 @@ int wex_space_create(wex_space_t *space, const char *name) {
     }
 
     if (wex_randombytes(space->space_id, WEX_ID_LEN) != 0) {
+        return -1;
+    }
+    if (wex_randombytes(space->space_key, 32) != 0) {
         return -1;
     }
 
@@ -104,7 +111,7 @@ int wex_space_get_invite(const wex_space_t *space, const char *peer_addr, char *
 }
 
 static size_t format_msg_sign_payload(const wex_chat_msg_t *msg, uint8_t *buf, size_t max_buf) {
-    /* Payload = space_id (32B) + channel + timestamp_ms (8B) + content */
+    /* Payload = space_id (32B) + channel + timestamp_ms (8B) + enc_flags + nonce + mac + content */
     size_t offset = 0;
 
     memcpy(buf + offset, msg->space_id, WEX_ID_LEN);
@@ -116,6 +123,14 @@ static size_t format_msg_sign_payload(const wex_chat_msg_t *msg, uint8_t *buf, s
 
     memcpy(buf + offset, &msg->timestamp_ms, sizeof(uint64_t));
     offset += sizeof(uint64_t);
+
+    buf[offset++] = msg->enc_flags;
+    if (msg->enc_flags != 0) {
+        memcpy(buf + offset, msg->nonce, 24);
+        offset += 24;
+        memcpy(buf + offset, msg->mac, 16);
+        offset += 16;
+    }
 
     size_t cont_len = strlen(msg->content);
     if (offset + cont_len > max_buf) {
@@ -157,4 +172,51 @@ bool wex_chat_msg_verify(const wex_chat_msg_t *msg) {
 
     int res = crypto_ed25519_check(msg->signature, msg->author_pk, payload, payload_len);
     return (res == 0);
+}
+
+int wex_chat_msg_encrypt(wex_chat_msg_t *msg, const uint8_t key[32], uint8_t enc_flag) {
+    if (!msg || !key || enc_flag == 0) return -1;
+
+    size_t p_len = strlen(msg->content);
+    if (p_len == 0 || p_len > (WEX_MAX_MSG_LEN / 2) - 1) return -1;
+
+    uint8_t ciphertext[WEX_MAX_MSG_LEN];
+    if (wex_encrypt(key, (const uint8_t *)msg->content, p_len, ciphertext, msg->nonce, msg->mac) != 0) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < p_len; i++) {
+        sprintf(msg->content + (i * 2), "%02x", ciphertext[i]);
+    }
+    msg->content[p_len * 2] = '\0';
+    msg->enc_flags = enc_flag;
+    return 0;
+}
+
+int wex_chat_msg_decrypt(wex_chat_msg_t *msg, const uint8_t key[32]) {
+    if (!msg || !key) return -1;
+    if (msg->enc_flags == 0) return 0; /* Already plaintext */
+
+    size_t hex_len = strlen(msg->content);
+    if (hex_len % 2 != 0 || hex_len / 2 > WEX_MAX_MSG_LEN) return -1;
+    size_t c_len = hex_len / 2;
+
+    uint8_t ciphertext[WEX_MAX_MSG_LEN];
+    for (size_t i = 0; i < c_len; i++) {
+        unsigned int byte_val;
+        if (sscanf(msg->content + (i * 2), "%02x", &byte_val) != 1) {
+            return -1;
+        }
+        ciphertext[i] = (uint8_t)byte_val;
+    }
+
+    uint8_t plaintext[WEX_MAX_MSG_LEN];
+    if (wex_decrypt(key, ciphertext, c_len, msg->nonce, msg->mac, plaintext) != 0) {
+        return -2; /* Decryption or MAC validation failure */
+    }
+
+    memcpy(msg->content, plaintext, c_len);
+    msg->content[c_len] = '\0';
+    msg->enc_flags = 0;
+    return 0;
 }

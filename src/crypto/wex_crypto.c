@@ -279,3 +279,35 @@ int wex_decrypt(const uint8_t key[WEX_KEY_LEN],
 
     return crypto_aead_unlock(plaintext, mac, key, nonce, NULL, 0, ciphertext, len);
 }
+
+int wex_ecdh(const uint8_t my_x25519_sk[WEX_KEY_LEN],
+             const uint8_t peer_x25519_pk[WEX_KEY_LEN],
+             uint8_t shared_secret[WEX_KEY_LEN]) {
+    if (!my_x25519_sk || !peer_x25519_pk || !shared_secret) {
+        return -1;
+    }
+    crypto_x25519(shared_secret, my_x25519_sk, peer_x25519_pk);
+    return 0;
+}
+
+int wex_kdf_session_key(const uint8_t shared_secret[WEX_KEY_LEN],
+                        const uint8_t salt[16],
+                        const char *context,
+                        uint8_t out_key[WEX_KEY_LEN]) {
+    if (!shared_secret || !out_key) {
+        return -1;
+    }
+
+    crypto_blake2b_ctx ctx;
+    crypto_blake2b_init(&ctx, WEX_KEY_LEN);
+    crypto_blake2b_update(&ctx, shared_secret, WEX_KEY_LEN);
+    if (salt) {
+        crypto_blake2b_update(&ctx, salt, 16);
+    }
+    if (context) {
+        crypto_blake2b_update(&ctx, (const uint8_t *)context, strlen(context));
+    }
+    crypto_blake2b_final(&ctx, out_key);
+    return 0;
+}
+

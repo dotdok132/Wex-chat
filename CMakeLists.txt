@@ -33,6 +33,7 @@ set(WEX_CORE_SOURCES
     src/net/wex_p2p.c
     src/net/wex_nat.c
     src/storage/wex_store.c
+    src/storage/wex_persist.c
     src/dht/wex_dht.c
 )
 
@@ -64,3 +65,19 @@ add_test(NAME test_dht COMMAND test_dht)
 add_executable(test_nat tests/test_nat.c)
 target_link_libraries(test_nat wex_core)
 add_test(NAME test_nat COMMAND test_nat)
+
+add_executable(test_persistence tests/test_persistence.c)
+target_link_libraries(test_persistence wex_core)
+add_test(NAME test_persistence COMMAND test_persistence)
+
+add_executable(test_e2ee tests/test_e2ee.c)
+target_link_libraries(test_e2ee wex_core)
+add_test(NAME test_e2ee COMMAND test_e2ee)
+
+add_executable(test_spaces_channels tests/test_spaces_channels.c)
+target_link_libraries(test_spaces_channels wex_core)
+add_test(NAME test_spaces_channels COMMAND test_spaces_channels)
+
+add_executable(test_seed_relay tests/test_seed_relay.c)
+target_link_libraries(test_seed_relay wex_core)
+add_test(NAME test_seed_relay COMMAND test_seed_relay)

@@ -81,7 +81,10 @@
   
   <div id="channels-bar">
     <div class="server-header" id="server-title">Wex Realm</div>
-    <div class="section-title">Каналы</div>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="section-title">Каналы</div>
+      <div style="cursor:pointer; color:var(--text-muted); padding-right:12px; font-weight:bold; font-size:18px;" title="Создать канал" onclick="createNewChannel()">+</div>
+    </div>
     <div class="channel-list" id="channel-container">
       <div class="channel-item active">general</div>
       <div class="channel-item">dev</div>
@@ -205,6 +208,16 @@
       elem.classList.add('active');
       document.getElementById('active-channel-name').innerText = ch;
       document.getElementById('msg-input').placeholder = `Написать в #${ch}...`;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'switch_channel', name: ch }));
+      }
+    }
+
+    function createNewChannel() {
+      const name = prompt('Введите имя нового канала (например, offtopic, dev):');
+      if (name && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'create_channel', name: name.trim() }));
+      }
     }
 
     function appendMessage(msg) {

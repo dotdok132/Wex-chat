@@ -15,17 +15,23 @@ typedef struct {
     uint8_t seed[32];
     uint8_t sign_pk[32];
     uint8_t sign_sk[64];
+    uint8_t x25519_pk[32];
+    uint8_t x25519_sk[32];
     char nickname[WEX_NAME_LEN];
     char status[32];
 } wex_identity_t;
 
 typedef struct {
     char name[WEX_NAME_LEN];
+    char topic[128];
+    uint8_t type; /* 0 = text, 1 = voice */
 } wex_channel_t;
 
 typedef struct {
     uint8_t space_id[WEX_ID_LEN];
     char name[WEX_NAME_LEN];
+    uint8_t owner_pk[32];
+    uint8_t space_key[32]; /* E2EE symmetric channel key */
     size_t channel_count;
     wex_channel_t channels[WEX_MAX_CHANNELS];
 } wex_space_t;
@@ -36,6 +42,9 @@ typedef struct {
     char author[WEX_NAME_LEN];
     uint8_t author_pk[32];
     uint64_t timestamp_ms;
+    uint8_t enc_flags; /* 0 = plaintext, 1 = channel E2EE, 2 = direct DM E2EE */
+    uint8_t nonce[24];
+    uint8_t mac[16];
     char content[WEX_MAX_MSG_LEN];
     uint8_t signature[64];
 } wex_chat_msg_t;
@@ -57,6 +66,12 @@ int wex_chat_msg_sign(wex_chat_msg_t *msg, const wex_identity_t *ident);
 
 /* Verify authenticity and integrity of a chat message */
 bool wex_chat_msg_verify(const wex_chat_msg_t *msg);
+
+/* Encrypt a chat message in-place using a symmetric key (channel key or DM session key) */
+int wex_chat_msg_encrypt(wex_chat_msg_t *msg, const uint8_t key[32], uint8_t enc_flag);
+
+/* Decrypt an encrypted chat message in-place using the symmetric key */
+int wex_chat_msg_decrypt(wex_chat_msg_t *msg, const uint8_t key[32]);
 
 /* Helper to convert 32-byte binary ID to 64-character hex string */
 void wex_id_to_hex(const uint8_t id[32], char hex[65]);

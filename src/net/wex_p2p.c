@@ -80,6 +80,117 @@ void wex_p2p_set_sync_callback(wex_p2p_node_t *node, wex_on_sync_req_fn sync_cb)
     node->sync_cb = sync_cb;
 }
 
+void wex_p2p_set_journal(wex_p2p_node_t *node, wex_journal_t *journal) {
+    if (!node) return;
+    node->journal = journal;
+}
+
+wex_space_t *wex_p2p_get_active_space(wex_p2p_node_t *node) {
+    if (!node) return NULL;
+    for (size_t i = 0; i < node->space_count; i++) {
+        if (memcmp(node->spaces[i].space_id, node->active_space_id, 32) == 0) {
+            return &node->spaces[i];
+        }
+    }
+    return NULL;
+}
+
+int wex_p2p_add_space(wex_p2p_node_t *node, const wex_space_t *space) {
+    if (!node || !space) return -1;
+
+    for (size_t i = 0; i < node->space_count; i++) {
+        if (memcmp(node->spaces[i].space_id, space->space_id, 32) == 0) {
+            node->spaces[i] = *space;
+            return 0;
+        }
+    }
+
+    if (node->space_count < WEX_MAX_SPACES) {
+        node->spaces[node->space_count++] = *space;
+        if (node->space_count == 1) {
+            wex_p2p_set_active_space(node, space->space_id);
+        }
+        return 0;
+    }
+    return -1;
+}
+
+int wex_p2p_set_active_space(wex_p2p_node_t *node, const uint8_t space_id[32]) {
+    if (!node || !space_id) return -1;
+    memcpy(node->active_space_id, space_id, 32);
+
+    wex_space_t *sp = wex_p2p_get_active_space(node);
+    if (sp && sp->channel_count > 0) {
+        strncpy(node->active_channel, sp->channels[0].name, sizeof(node->active_channel) - 1);
+    } else {
+        strncpy(node->active_channel, "general", sizeof(node->active_channel) - 1);
+    }
+    return 0;
+}
+
+int wex_p2p_set_active_channel(wex_p2p_node_t *node, const char *channel_name) {
+    if (!node || !channel_name || strlen(channel_name) == 0) return -1;
+    strncpy(node->active_channel, channel_name, sizeof(node->active_channel) - 1);
+    node->active_channel[sizeof(node->active_channel) - 1] = '\0';
+    return 0;
+}
+
+int wex_p2p_send_space_info(wex_p2p_node_t *node, const struct sockaddr_in *target_addr) {
+    if (!node || node->udp_fd < 0 || !target_addr) return -1;
+
+    wex_space_t *sp = wex_p2p_get_active_space(node);
+    if (!sp) return -1;
+
+    uint8_t buffer[WEX_MAX_UDP_PAYLOAD];
+    wex_pkt_hdr_t *hdr = (wex_pkt_hdr_t *)buffer;
+    hdr->magic = htonl(WEX_P2P_MAGIC);
+    hdr->type = WEX_PKT_SPACE_INFO;
+    memcpy(hdr->sender_pk, node->identity->sign_pk, 32);
+    memcpy(hdr->space_id, sp->space_id, 32);
+
+    uint8_t *payload = buffer + sizeof(wex_pkt_hdr_t);
+    size_t off = 0;
+
+    /* Space name */
+    size_t name_len = strlen(sp->name) + 1;
+    memcpy(payload + off, sp->name, name_len);
+    off += name_len;
+
+    /* Channel count */
+    payload[off++] = (uint8_t)sp->channel_count;
+
+    /* Channels */
+    for (size_t c = 0; c < sp->channel_count; c++) {
+        size_t ch_len = strlen(sp->channels[c].name) + 1;
+        memcpy(payload + off, sp->channels[c].name, ch_len);
+        off += ch_len;
+    }
+
+    hdr->payload_len = htons((uint16_t)off);
+    ssize_t s = sendto(node->udp_fd, buffer, sizeof(wex_pkt_hdr_t) + off, 0,
+                       (struct sockaddr *)target_addr, sizeof(*target_addr));
+    return (s == (ssize_t)(sizeof(wex_pkt_hdr_t) + off)) ? 0 : -1;
+}
+
+int wex_p2p_create_channel(wex_p2p_node_t *node, const char *channel_name) {
+    if (!node || !channel_name) return -1;
+
+    wex_space_t *sp = wex_p2p_get_active_space(node);
+    if (!sp) return -1;
+
+    if (wex_space_add_channel(sp, channel_name) != 0) {
+        return -1;
+    }
+
+    /* Broadcast space info with new channel to all peers */
+    for (size_t i = 0; i < node->peer_count; i++) {
+        if (node->peers[i].active) {
+            wex_p2p_send_space_info(node, &node->peers[i].addr);
+        }
+    }
+    return 0;
+}
+
 void wex_p2p_request_sync(wex_p2p_node_t *node, const struct sockaddr_in *target_addr) {
     if (!node || node->udp_fd < 0 || !target_addr) return;
 
@@ -195,6 +306,15 @@ static size_t serialize_chat_msg(const wex_chat_msg_t *msg, uint8_t *out_buf, si
     memcpy(payload + off, &ts_net, sizeof(ts_net));
     off += sizeof(ts_net);
 
+    /* Encryption metadata */
+    payload[off++] = msg->enc_flags;
+    if (msg->enc_flags != 0) {
+        memcpy(payload + off, msg->nonce, 24);
+        off += 24;
+        memcpy(payload + off, msg->mac, 16);
+        off += 16;
+    }
+
     /* Content */
     size_t cont_len = strlen(msg->content) + 1;
     memcpy(payload + off, msg->content, cont_len);
@@ -210,6 +330,11 @@ static size_t serialize_chat_msg(const wex_chat_msg_t *msg, uint8_t *out_buf, si
 
 int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg) {
     if (!node || node->udp_fd < 0 || !msg) return -1;
+
+    /* Auto-persist to journal if available */
+    if (node->journal) {
+        wex_journal_append(node->journal, msg);
+    }
 
     uint8_t buffer[WEX_MAX_UDP_PAYLOAD];
     size_t total_len = serialize_chat_msg(msg, buffer, sizeof(buffer));
@@ -432,6 +557,16 @@ static void parse_and_deliver_chat_msg(wex_p2p_node_t *node, const uint8_t *payl
     off += sizeof(uint64_t);
     if (off >= payload_len) return;
 
+    /* Encryption metadata */
+    msg.enc_flags = payload[off++];
+    if (msg.enc_flags != 0) {
+        if (off + 24 + 16 > payload_len) return;
+        memcpy(msg.nonce, payload + off, 24);
+        off += 24;
+        memcpy(msg.mac, payload + off, 16);
+        off += 16;
+    }
+
     /* Content */
     const char *content_str = (const char *)(payload + off);
     size_t cont_len = strnlen(content_str, payload_len - off) + 1;
@@ -445,6 +580,9 @@ static void parse_and_deliver_chat_msg(wex_p2p_node_t *node, const uint8_t *payl
 
     /* Cryptographic verification of author's Ed25519 signature */
     if (wex_chat_msg_verify(&msg)) {
+        if (node->journal) {
+            wex_journal_append(node->journal, &msg);
+        }
         if (node->msg_cb) {
             node->msg_cb(&msg, node->user_data);
         }
@@ -550,6 +688,7 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
 
             sendto(node->udp_fd, resp_buf, sizeof(wex_pkt_hdr_t) + my_nick_len, 0,
                    (struct sockaddr *)&src_addr, sizeof(src_addr));
+            wex_p2p_send_space_info(node, &src_addr);
             break;
         }
 
@@ -569,7 +708,39 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
                     wex_p2p_request_sync(node, &p->addr);
                     p->synced = true;
                 }
+                wex_p2p_send_space_info(node, &src_addr);
             }
+            break;
+        }
+
+        case WEX_PKT_SPACE_INFO: {
+            if (payload_len < 2) break;
+            size_t off = 0;
+
+            const char *sp_name = (const char *)(payload + off);
+            size_t nlen = strnlen(sp_name, payload_len - off) + 1;
+            off += nlen;
+            if (off >= payload_len) break;
+
+            uint8_t ch_count = payload[off++];
+
+            wex_space_t space;
+            memset(&space, 0, sizeof(space));
+            memcpy(space.space_id, hdr->space_id, 32);
+            strncpy(space.name, sp_name, sizeof(space.name) - 1);
+            memcpy(space.owner_pk, hdr->sender_pk, 32);
+
+            for (uint8_t c = 0; c < ch_count && off < payload_len; c++) {
+                const char *chn = (const char *)(payload + off);
+                size_t clen = strnlen(chn, payload_len - off) + 1;
+                off += clen;
+                if (space.channel_count < WEX_MAX_CHANNELS) {
+                    strncpy(space.channels[space.channel_count].name, chn, WEX_NAME_LEN - 1);
+                    space.channel_count++;
+                }
+            }
+
+            wex_p2p_add_space(node, &space);
             break;
         }
 
@@ -584,6 +755,17 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
             if (node->sync_cb) {
                 wex_chat_msg_t hist_msgs[32];
                 size_t hist_count = node->sync_cb(hdr->space_id, target_ch, hist_msgs, 32, node->user_data);
+                for (size_t i = 0; i < hist_count; i++) {
+                    uint8_t out_buf[WEX_MAX_UDP_PAYLOAD];
+                    size_t out_len = serialize_chat_msg(&hist_msgs[i], out_buf, sizeof(out_buf));
+                    if (out_len > 0) {
+                        sendto(node->udp_fd, out_buf, out_len, 0,
+                               (struct sockaddr *)&src_addr, sizeof(src_addr));
+                    }
+                }
+            } else if (node->journal) {
+                wex_chat_msg_t hist_msgs[32];
+                size_t hist_count = wex_journal_read_recent(node->journal, hdr->space_id, target_ch, hist_msgs, 32);
                 for (size_t i = 0; i < hist_count; i++) {
                     uint8_t out_buf[WEX_MAX_UDP_PAYLOAD];
                     size_t out_len = serialize_chat_msg(&hist_msgs[i], out_buf, sizeof(out_buf));

@@ -55,4 +55,15 @@ int wex_decrypt(const uint8_t key[WEX_KEY_LEN],
                 const uint8_t mac[WEX_MAC_LEN],
                 uint8_t *plaintext);
 
+/* X25519 Diffie-Hellman Key Exchange: shared_secret = X25519(my_sk, peer_pk) */
+int wex_ecdh(const uint8_t my_x25519_sk[WEX_KEY_LEN],
+             const uint8_t peer_x25519_pk[WEX_KEY_LEN],
+             uint8_t shared_secret[WEX_KEY_LEN]);
+
+/* Session Key Derivation (BLAKE2b KDF) from shared secret and context info */
+int wex_kdf_session_key(const uint8_t shared_secret[WEX_KEY_LEN],
+                        const uint8_t salt[16],
+                        const char *context,
+                        uint8_t out_key[WEX_KEY_LEN]);
+
 #endif /* WEX_CRYPTO_H */

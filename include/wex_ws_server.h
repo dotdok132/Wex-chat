@@ -23,6 +23,7 @@ typedef struct {
     wex_chat_msg_t history[WEX_MAX_HISTORY];
     int client_fds[WEX_MAX_CLIENTS];
 
+    wex_journal_t *journal;
     wex_p2p_node_t p2p;
 } wex_server_t;
 

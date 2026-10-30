@@ -199,7 +199,8 @@ int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *ni
     if (wex_p2p_init(&srv->p2p, &srv->identity, srv->udp_port) != 0) {
         return -1;
     }
-    memcpy(srv->p2p.active_space_id, srv->spaces[0].space_id, 32);
+    wex_p2p_add_space(&srv->p2p, &srv->spaces[0]);
+    wex_p2p_set_active_space(&srv->p2p, srv->spaces[0].space_id);
     wex_p2p_set_callbacks(&srv->p2p, on_p2p_incoming_msg, on_p2p_peer_event, srv);
     wex_p2p_set_sync_callback(&srv->p2p, on_p2p_sync_request);
 
@@ -265,21 +266,25 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
     cJSON_AddItemToObject(root, "identity", ident);
 
     cJSON *spaces = cJSON_CreateArray();
-    for (size_t s = 0; s < srv->space_count; s++) {
+    size_t sc = (srv->p2p.space_count > 0) ? srv->p2p.space_count : srv->space_count;
+    wex_space_t *src_spaces = (srv->p2p.space_count > 0) ? srv->p2p.spaces : srv->spaces;
+
+    for (size_t s = 0; s < sc; s++) {
         cJSON *sp = cJSON_CreateObject();
         char sp_hex[65];
-        wex_id_to_hex(srv->spaces[s].space_id, sp_hex);
+        wex_id_to_hex(src_spaces[s].space_id, sp_hex);
         cJSON_AddStringToObject(sp, "id", sp_hex);
-        cJSON_AddStringToObject(sp, "name", srv->spaces[s].name);
+        cJSON_AddStringToObject(sp, "name", src_spaces[s].name);
 
         cJSON *chs = cJSON_CreateArray();
-        for (size_t c = 0; c < srv->spaces[s].channel_count; c++) {
-            cJSON_AddItemToArray(chs, cJSON_CreateString(srv->spaces[s].channels[c].name));
+        for (size_t c = 0; c < src_spaces[s].channel_count; c++) {
+            cJSON_AddItemToArray(chs, cJSON_CreateString(src_spaces[s].channels[c].name));
         }
         cJSON_AddItemToObject(sp, "channels", chs);
         cJSON_AddItemToArray(spaces, sp);
     }
     cJSON_AddItemToObject(root, "spaces", spaces);
+    cJSON_AddStringToObject(root, "active_channel", srv->p2p.active_channel);
 
     cJSON *peers = cJSON_CreateArray();
     for (size_t p = 0; p < srv->p2p.peer_count; p++) {
@@ -343,7 +348,20 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
         cJSON *name = cJSON_GetObjectItem(root, "name");
         if (name && cJSON_IsString(name) && srv->space_count < WEX_MAX_SPACES) {
             wex_space_create(&srv->spaces[srv->space_count], name->valuestring);
+            wex_p2p_add_space(&srv->p2p, &srv->spaces[srv->space_count]);
             srv->space_count++;
+            send_status_json(srv, client_fd);
+        }
+    } else if (strcmp(action->valuestring, "create_channel") == 0) {
+        cJSON *ch_name = cJSON_GetObjectItem(root, "name");
+        if (ch_name && cJSON_IsString(ch_name)) {
+            wex_p2p_create_channel(&srv->p2p, ch_name->valuestring);
+            send_status_json(srv, client_fd);
+        }
+    } else if (strcmp(action->valuestring, "switch_channel") == 0) {
+        cJSON *ch_name = cJSON_GetObjectItem(root, "name");
+        if (ch_name && cJSON_IsString(ch_name)) {
+            wex_p2p_set_active_channel(&srv->p2p, ch_name->valuestring);
             send_status_json(srv, client_fd);
         }
     } else if (strcmp(action->valuestring, "send_message") == 0) {
@@ -352,11 +370,15 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
         if (text && cJSON_IsString(text)) {
             wex_chat_msg_t msg;
             memset(&msg, 0, sizeof(msg));
-            if (srv->space_count > 0) {
+            if (srv->p2p.space_count > 0) {
+                memcpy(msg.space_id, srv->p2p.active_space_id, WEX_ID_LEN);
+            } else if (srv->space_count > 0) {
                 memcpy(msg.space_id, srv->spaces[0].space_id, WEX_ID_LEN);
             }
-            if (channel && cJSON_IsString(channel)) {
+            if (channel && cJSON_IsString(channel) && strlen(channel->valuestring) > 0) {
                 strncpy(msg.channel, channel->valuestring, sizeof(msg.channel) - 1);
+            } else if (strlen(srv->p2p.active_channel) > 0) {
+                strncpy(msg.channel, srv->p2p.active_channel, sizeof(msg.channel) - 1);
             } else {
                 strncpy(msg.channel, "general", sizeof(msg.channel) - 1);
             }

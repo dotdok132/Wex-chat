@@ -3,6 +3,7 @@
 
 #include "wex_models.h"
 #include "wex_dht.h"
+#include "wex_persist.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -24,6 +25,7 @@ typedef enum {
     WEX_PKT_NAT_PUNCH_REQ = 0x08, /* Request rendezvous peer to coordinate hole punching */
     WEX_PKT_NAT_PUNCH_TRIGGER = 0x09, /* Rendezvous instructs peer to punch to target */
     WEX_PKT_NAT_PUNCH     = 0x0A, /* Direct hole punch probe */
+    WEX_PKT_SPACE_INFO    = 0x0C, /* Space name & channel list synchronization */
     WEX_PKT_CHAT_MSG      = 0x10, /* Direct encrypted & signed chat message */
     WEX_PKT_STORE_SHARD   = 0x20, /* Quas Store-and-Forward shard for offline peer */
     WEX_PKT_PULL_SHARDS   = 0x21, /* Offline peer querying for stored shards */
@@ -72,6 +74,13 @@ typedef struct {
     uint8_t active_space_id[32];
     char active_channel[WEX_NAME_LEN];
 
+    /* Multi-space and multi-channel registry */
+    wex_space_t spaces[WEX_MAX_SPACES];
+    size_t space_count;
+
+    /* Message persistence journal */
+    wex_journal_t *journal;
+
     /* Kademlia DHT routing table */
     wex_dht_table_t dht;
 
@@ -98,6 +107,17 @@ void wex_p2p_set_callbacks(wex_p2p_node_t *node, wex_on_msg_fn msg_cb, wex_on_pe
 
 /* Set sync provider callback */
 void wex_p2p_set_sync_callback(wex_p2p_node_t *node, wex_on_sync_req_fn sync_cb);
+
+/* Attach open persistence journal to automatically save incoming/outgoing messages */
+void wex_p2p_set_journal(wex_p2p_node_t *node, wex_journal_t *journal);
+
+/* Spaces and Channels API */
+int wex_p2p_add_space(wex_p2p_node_t *node, const wex_space_t *space);
+wex_space_t *wex_p2p_get_active_space(wex_p2p_node_t *node);
+int wex_p2p_set_active_space(wex_p2p_node_t *node, const uint8_t space_id[32]);
+int wex_p2p_set_active_channel(wex_p2p_node_t *node, const char *channel_name);
+int wex_p2p_create_channel(wex_p2p_node_t *node, const char *channel_name);
+int wex_p2p_send_space_info(wex_p2p_node_t *node, const struct sockaddr_in *target_addr);
 
 /* Connect to a remote peer (sends HELLO) - supports both IP and domain name hostnames */
 int wex_p2p_connect(wex_p2p_node_t *node, const char *host_or_ip, int port);
