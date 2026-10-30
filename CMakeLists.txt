@@ -106,3 +106,7 @@ add_test(NAME test_permissions COMMAND test_permissions)
 add_executable(test_actions tests/test_actions.c)
 target_link_libraries(test_actions wex_core)
 add_test(NAME test_actions COMMAND test_actions)
+
+add_executable(test_e2e_full_stack tests/test_e2e_full_stack.c)
+target_link_libraries(test_e2e_full_stack wex_core)
+add_test(NAME test_e2e_full_stack COMMAND test_e2e_full_stack)

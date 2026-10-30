@@ -3,6 +3,8 @@
 
 #include "wex_models.h"
 #include "wex_p2p.h"
+#include "wex_actions.h"
+#include "wex_voice.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -25,6 +27,8 @@ typedef struct {
 
     wex_journal_t *journal;
     wex_p2p_node_t p2p;
+    wex_reactions_store_t reactions;
+    wex_voice_room_t voice_room;
 } wex_server_t;
 
 /* Initialize server state, identity, and P2P engine */

@@ -5,6 +5,8 @@
 #include "wex_dht.h"
 #include "wex_persist.h"
 #include "wex_blob.h"
+#include "wex_actions.h"
+#include "wex_voice.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -38,7 +40,9 @@ typedef enum {
     WEX_PKT_DHT_PROVIDERS = 0x35, /* Response with topic providers */
     WEX_PKT_BLOB_OFFER    = 0x40, /* Announce available file/blob in swarm */
     WEX_PKT_BLOB_REQ      = 0x41, /* Request specific chunk of a blob */
-    WEX_PKT_BLOB_CHUNK    = 0x42  /* Chunk payload delivery */
+    WEX_PKT_BLOB_CHUNK    = 0x42, /* Chunk payload delivery */
+    WEX_PKT_VOICE_FRAME   = 0x50, /* Encapsulated audio frame with jitter timestamp */
+    WEX_PKT_MSG_ACTION    = 0x51  /* Signed message action (react, edit, delete) */
 } wex_pkt_type_t;
 
 /* Binary header on the wire */
@@ -73,6 +77,8 @@ typedef void (*wex_on_msg_fn)(const wex_chat_msg_t *msg, void *user_data);
 typedef void (*wex_on_peer_fn)(const wex_peer_t *peer, bool joined, void *user_data);
 typedef size_t (*wex_on_sync_req_fn)(const uint8_t space_id[32], const char *channel, wex_chat_msg_t out_msgs[], size_t max_msgs, void *user_data);
 typedef void (*wex_on_blob_fn)(const wex_blob_info_t *info, const uint8_t *data, void *user_data);
+typedef void (*wex_on_action_fn)(const wex_msg_action_t *action, void *user_data);
+typedef void (*wex_on_voice_fn)(const char *channel, const wex_voice_hdr_t *hdr, const uint8_t *audio_data, size_t audio_len, void *user_data);
 
 /* P2P Node Engine */
 typedef struct {
@@ -114,6 +120,8 @@ typedef struct {
     wex_on_peer_fn peer_cb;
     wex_on_sync_req_fn sync_cb;
     wex_on_blob_fn blob_cb;
+    wex_on_action_fn action_cb;
+    wex_on_voice_fn voice_cb;
     void *user_data;
 } wex_p2p_node_t;
 
@@ -128,6 +136,10 @@ void wex_p2p_set_sync_callback(wex_p2p_node_t *node, wex_on_sync_req_fn sync_cb)
 
 /* Set blob download completion callback */
 void wex_p2p_set_blob_callback(wex_p2p_node_t *node, wex_on_blob_fn blob_cb);
+
+/* Set message action and voice frame callbacks */
+void wex_p2p_set_action_callback(wex_p2p_node_t *node, wex_on_action_fn action_cb);
+void wex_p2p_set_voice_callback(wex_p2p_node_t *node, wex_on_voice_fn voice_cb);
 
 /* Set data directory for blob storage */
 void wex_p2p_set_data_dir(wex_p2p_node_t *node, const char *data_dir);
@@ -157,6 +169,13 @@ void wex_p2p_request_sync(wex_p2p_node_t *node, const struct sockaddr_in *target
 
 /* Broadcast a chat message to all connected peers in the space */
 int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg);
+
+/* Broadcast a message action (react, edit, delete) to peers */
+int wex_p2p_send_action(wex_p2p_node_t *node, const uint8_t space_id[32], const wex_msg_action_t *action);
+
+/* Broadcast a voice audio frame with RTP-like header */
+int wex_p2p_send_voice_frame(wex_p2p_node_t *node, const uint8_t space_id[32], const char *channel,
+                             const wex_voice_hdr_t *hdr, const uint8_t *audio_data, size_t audio_len);
 
 /* Send encrypted Direct Message (E2EE with X25519 + ChaCha20-Poly1305) */
 int wex_p2p_send_dm(wex_p2p_node_t *node, const uint8_t target_pk[32], const char *text);

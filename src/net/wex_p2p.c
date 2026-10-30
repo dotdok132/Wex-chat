@@ -92,6 +92,16 @@ void wex_p2p_set_blob_callback(wex_p2p_node_t *node, wex_on_blob_fn blob_cb) {
     node->blob_cb = blob_cb;
 }
 
+void wex_p2p_set_action_callback(wex_p2p_node_t *node, wex_on_action_fn action_cb) {
+    if (!node) return;
+    node->action_cb = action_cb;
+}
+
+void wex_p2p_set_voice_callback(wex_p2p_node_t *node, wex_on_voice_fn voice_cb) {
+    if (!node) return;
+    node->voice_cb = voice_cb;
+}
+
 void wex_p2p_set_data_dir(wex_p2p_node_t *node, const char *data_dir) {
     if (!node || !data_dir) return;
     strncpy(node->data_dir, data_dir, sizeof(node->data_dir) - 1);
@@ -470,6 +480,75 @@ int wex_p2p_broadcast_msg(wex_p2p_node_t *node, const wex_chat_msg_t *msg) {
         }
     }
 
+    return sent_count;
+}
+
+int wex_p2p_send_action(wex_p2p_node_t *node, const uint8_t space_id[32], const wex_msg_action_t *action) {
+    if (!node || node->udp_fd < 0 || !action) return -1;
+    uint8_t buffer[WEX_MAX_UDP_PAYLOAD];
+    wex_pkt_hdr_t hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.magic = htonl(WEX_P2P_MAGIC);
+    hdr.type = WEX_PKT_MSG_ACTION;
+    memcpy(hdr.sender_pk, node->identity->sign_pk, 32);
+    if (space_id) memcpy(hdr.space_id, space_id, 32);
+    hdr.payload_len = htons((uint16_t)sizeof(wex_msg_action_t));
+
+    memcpy(buffer, &hdr, sizeof(hdr));
+    memcpy(buffer + sizeof(hdr), action, sizeof(wex_msg_action_t));
+    size_t total_len = sizeof(hdr) + sizeof(wex_msg_action_t);
+
+    int sent_count = 0;
+    for (size_t i = 0; i < node->peer_count; i++) {
+        if (node->peers[i].active) {
+            ssize_t s = sendto(node->udp_fd, buffer, total_len, 0,
+                               (struct sockaddr *)&node->peers[i].addr, sizeof(node->peers[i].addr));
+            if (s == (ssize_t)total_len) {
+                sent_count++;
+            }
+        }
+    }
+    return sent_count;
+}
+
+int wex_p2p_send_voice_frame(wex_p2p_node_t *node, const uint8_t space_id[32], const char *channel,
+                             const wex_voice_hdr_t *voice_hdr, const uint8_t *audio_data, size_t audio_len) {
+    if (!node || node->udp_fd < 0 || !voice_hdr) return -1;
+    if (audio_len > 1024) return -1;
+
+    uint8_t buffer[WEX_MAX_UDP_PAYLOAD];
+    wex_pkt_hdr_t hdr;
+    memset(&hdr, 0, sizeof(hdr));
+    hdr.magic = htonl(WEX_P2P_MAGIC);
+    hdr.type = WEX_PKT_VOICE_FRAME;
+    memcpy(hdr.sender_pk, node->identity->sign_pk, 32);
+    if (space_id) memcpy(hdr.space_id, space_id, 32);
+
+    char ch_buf[WEX_NAME_LEN];
+    memset(ch_buf, 0, sizeof(ch_buf));
+    if (channel) strncpy(ch_buf, channel, sizeof(ch_buf) - 1);
+
+    uint16_t p_len = (uint16_t)(sizeof(ch_buf) + sizeof(wex_voice_hdr_t) + audio_len);
+    hdr.payload_len = htons(p_len);
+
+    size_t off = 0;
+    memcpy(buffer + off, &hdr, sizeof(hdr)); off += sizeof(hdr);
+    memcpy(buffer + off, ch_buf, sizeof(ch_buf)); off += sizeof(ch_buf);
+    memcpy(buffer + off, voice_hdr, sizeof(wex_voice_hdr_t)); off += sizeof(wex_voice_hdr_t);
+    if (audio_data && audio_len > 0) {
+        memcpy(buffer + off, audio_data, audio_len); off += audio_len;
+    }
+
+    int sent_count = 0;
+    for (size_t i = 0; i < node->peer_count; i++) {
+        if (node->peers[i].active) {
+            ssize_t s = sendto(node->udp_fd, buffer, off, 0,
+                               (struct sockaddr *)&node->peers[i].addr, sizeof(node->peers[i].addr));
+            if (s == (ssize_t)off) {
+                sent_count++;
+            }
+        }
+    }
     return sent_count;
 }
 
@@ -1331,6 +1410,38 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
                         }
                     }
                 }
+            }
+            break;
+        }
+
+        case WEX_PKT_MSG_ACTION: {
+            if (payload_len < sizeof(wex_msg_action_t)) break;
+            wex_msg_action_t action;
+            memcpy(&action, payload, sizeof(wex_msg_action_t));
+            if (!wex_msg_action_verify(&action)) {
+                break;
+            }
+            if (node->action_cb) {
+                node->action_cb(&action, node->user_data);
+            }
+            break;
+        }
+
+        case WEX_PKT_VOICE_FRAME: {
+            if (payload_len < sizeof(char) * WEX_NAME_LEN + sizeof(wex_voice_hdr_t)) break;
+            char v_channel[WEX_NAME_LEN];
+            memcpy(v_channel, payload, WEX_NAME_LEN);
+            v_channel[WEX_NAME_LEN - 1] = '\0';
+
+            wex_voice_hdr_t v_hdr;
+            memcpy(&v_hdr, payload + WEX_NAME_LEN, sizeof(wex_voice_hdr_t));
+
+            size_t audio_offset = WEX_NAME_LEN + sizeof(wex_voice_hdr_t);
+            size_t audio_sz = (payload_len > audio_offset) ? (payload_len - audio_offset) : 0;
+            const uint8_t *audio_ptr = (audio_sz > 0) ? (payload + audio_offset) : NULL;
+
+            if (node->voice_cb) {
+                node->voice_cb(v_channel, &v_hdr, audio_ptr, audio_sz, node->user_data);
             }
             break;
         }

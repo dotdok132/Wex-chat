@@ -134,6 +134,12 @@ static void on_p2p_incoming_msg(const wex_chat_msg_t *msg, void *user_data) {
     cJSON_AddStringToObject(out, "content", msg->content);
     cJSON_AddNumberToObject(out, "timestamp_ms", (double)msg->timestamp_ms);
 
+    char sig_hex[129];
+    for (int i = 0; i < 64; i++) sprintf(sig_hex + (i * 2), "%02x", msg->signature[i]);
+    sig_hex[128] = '\0';
+    cJSON_AddStringToObject(out, "signature", sig_hex);
+    cJSON_AddStringToObject(out, "reactions", "");
+
     char *json_out = cJSON_PrintUnformatted(out);
     if (json_out) {
         wex_server_broadcast(srv, json_out);
@@ -198,6 +204,77 @@ static void on_p2p_blob_event(const wex_blob_info_t *info, const uint8_t *data, 
     cJSON_Delete(out);
 }
 
+static void on_p2p_action_event(const wex_msg_action_t *action, void *user_data) {
+    wex_server_t *srv = (wex_server_t *)user_data;
+    if (!srv || !action) return;
+
+    wex_chat_msg_t *target_msg = NULL;
+    for (size_t h = 0; h < srv->history_count; h++) {
+        if (memcmp(srv->history[h].signature, action->target_sig, 64) == 0) {
+            target_msg = &srv->history[h];
+            break;
+        }
+    }
+    if (!target_msg) return;
+
+    if (wex_msg_action_apply(&srv->reactions, NULL, target_msg, action) == 0) {
+        char sig_hex[129];
+        for (int i = 0; i < 64; i++) sprintf(sig_hex + (i * 2), "%02x", action->target_sig[i]);
+        sig_hex[128] = '\0';
+
+        cJSON *out = cJSON_CreateObject();
+        if (action->action_type == WEX_ACTION_REACT) {
+            char summary[128];
+            wex_reactions_get_summary(&srv->reactions, action->target_sig, summary, sizeof(summary));
+            cJSON_AddStringToObject(out, "type", "reaction_updated");
+            cJSON_AddStringToObject(out, "target_sig", sig_hex);
+            cJSON_AddStringToObject(out, "summary", summary);
+        } else if (action->action_type == WEX_ACTION_EDIT) {
+            cJSON_AddStringToObject(out, "type", "message_edited");
+            cJSON_AddStringToObject(out, "target_sig", sig_hex);
+            cJSON_AddStringToObject(out, "content", target_msg->content);
+        } else if (action->action_type == WEX_ACTION_DELETE) {
+            cJSON_AddStringToObject(out, "type", "message_deleted");
+            cJSON_AddStringToObject(out, "target_sig", sig_hex);
+        }
+        char *json_out = cJSON_PrintUnformatted(out);
+        if (json_out) {
+            wex_server_broadcast(srv, json_out);
+            free(json_out);
+        }
+        cJSON_Delete(out);
+    }
+}
+
+static void on_p2p_voice_event(const char *channel, const wex_voice_hdr_t *hdr, const uint8_t *audio_data, size_t audio_len, void *user_data) {
+    wex_server_t *srv = (wex_server_t *)user_data;
+    if (!srv || !hdr || !srv->voice_room.is_in_call) return;
+    if (channel && strcmp(srv->voice_room.channel, channel) != 0) return;
+
+    /* Push incoming frame to local jitter buffer */
+    wex_jitter_buffer_push(&srv->voice_room.jitter, hdr, audio_data, audio_len);
+
+    /* Broadcast voice stream chunk to connected Web UI clients */
+    if (audio_data && audio_len > 0) {
+        char *b64 = wex_b64_encode(audio_data, audio_len);
+        if (b64) {
+            cJSON *out = cJSON_CreateObject();
+            cJSON_AddStringToObject(out, "type", "voice_stream");
+            cJSON_AddStringToObject(out, "channel", channel ? channel : "");
+            cJSON_AddNumberToObject(out, "ssrc", (double)hdr->ssrc);
+            cJSON_AddNumberToObject(out, "seq", (double)hdr->sequence);
+            cJSON_AddStringToObject(out, "data_base64", b64);
+            char *json_out = cJSON_PrintUnformatted(out);
+            if (json_out) {
+                wex_server_broadcast(srv, json_out);
+                free(json_out);
+            }
+            cJSON_Delete(out);
+            free(b64);
+        }
+    }
+}
+
 int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *nickname) {
     if (!srv) return -1;
     memset(srv, 0, sizeof(*srv));
@@ -227,6 +304,11 @@ int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *ni
     wex_p2p_set_callbacks(&srv->p2p, on_p2p_incoming_msg, on_p2p_peer_event, srv);
     wex_p2p_set_sync_callback(&srv->p2p, on_p2p_sync_request);
     wex_p2p_set_blob_callback(&srv->p2p, on_p2p_blob_event);
+    wex_p2p_set_action_callback(&srv->p2p, on_p2p_action_event);
+    wex_p2p_set_voice_callback(&srv->p2p, on_p2p_voice_event);
+
+    wex_reactions_store_init(&srv->reactions);
+    wex_voice_room_init(&srv->voice_room, "voice-lounge", (uint32_t)srv->udp_port);
 
     return 0;
 }
@@ -335,9 +417,24 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
         cJSON_AddStringToObject(m, "channel", srv->history[h].channel);
         cJSON_AddStringToObject(m, "content", srv->history[h].content);
         cJSON_AddNumberToObject(m, "timestamp_ms", (double)srv->history[h].timestamp_ms);
+
+        char sig_hex[129];
+        for (int i = 0; i < 64; i++) sprintf(sig_hex + (i * 2), "%02x", srv->history[h].signature[i]);
+        sig_hex[128] = '\0';
+        cJSON_AddStringToObject(m, "signature", sig_hex);
+
+        char reacts[128];
+        wex_reactions_get_summary(&srv->reactions, srv->history[h].signature, reacts, sizeof(reacts));
+        cJSON_AddStringToObject(m, "reactions", reacts);
+
         cJSON_AddItemToArray(hist, m);
     }
     cJSON_AddItemToObject(root, "history", hist);
+
+    cJSON *voice = cJSON_CreateObject();
+    cJSON_AddBoolToObject(voice, "connected", srv->voice_room.is_in_call);
+    cJSON_AddStringToObject(voice, "channel", srv->voice_room.channel);
+    cJSON_AddItemToObject(root, "voice", voice);
 
     char *json_str = cJSON_PrintUnformatted(root);
     if (json_str) {
@@ -611,6 +708,169 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
                         }
                     }
                 }
+            }
+        }
+    } else if (strcmp(action->valuestring, "send_reaction") == 0) {
+        cJSON *sig_hex = cJSON_GetObjectItem(root, "target_sig");
+        cJSON *emoji = cJSON_GetObjectItem(root, "emoji");
+        if (sig_hex && cJSON_IsString(sig_hex) && strlen(sig_hex->valuestring) == 128 &&
+            emoji && cJSON_IsString(emoji)) {
+            uint8_t tgt_sig[64];
+            for (int i = 0; i < 64; i++) {
+                unsigned int v;
+                sscanf(sig_hex->valuestring + (i * 2), "%02x", &v);
+                tgt_sig[i] = (uint8_t)v;
+            }
+            wex_chat_msg_t *target_msg = NULL;
+            for (size_t h = 0; h < srv->history_count; h++) {
+                if (memcmp(srv->history[h].signature, tgt_sig, 64) == 0) {
+                    target_msg = &srv->history[h];
+                    break;
+                }
+            }
+            if (target_msg) {
+                wex_msg_action_t act;
+                memset(&act, 0, sizeof(act));
+                act.action_type = WEX_ACTION_REACT;
+                memcpy(act.target_sig, tgt_sig, 64);
+                memcpy(act.space_id, target_msg->space_id, 32);
+                strncpy(act.channel, target_msg->channel, sizeof(act.channel) - 1);
+                strncpy(act.payload, emoji->valuestring, sizeof(act.payload) - 1);
+                act.timestamp_ms = (uint64_t)time(NULL) * 1000ULL;
+                wex_msg_action_sign(&act, &srv->identity);
+
+                if (wex_msg_action_apply(&srv->reactions, NULL, target_msg, &act) == 0) {
+                    wex_p2p_send_action(&srv->p2p, act.space_id, &act);
+                    char summary[128];
+                    wex_reactions_get_summary(&srv->reactions, tgt_sig, summary, sizeof(summary));
+
+                    cJSON *out = cJSON_CreateObject();
+                    cJSON_AddStringToObject(out, "type", "reaction_updated");
+                    cJSON_AddStringToObject(out, "target_sig", sig_hex->valuestring);
+                    cJSON_AddStringToObject(out, "summary", summary);
+                    char *json_out = cJSON_PrintUnformatted(out);
+                    if (json_out) {
+                        wex_server_broadcast(srv, json_out);
+                        free(json_out);
+                    }
+                    cJSON_Delete(out);
+                }
+            }
+        }
+    } else if (strcmp(action->valuestring, "edit_message") == 0) {
+        cJSON *sig_hex = cJSON_GetObjectItem(root, "target_sig");
+        cJSON *new_text = cJSON_GetObjectItem(root, "text");
+        if (sig_hex && cJSON_IsString(sig_hex) && strlen(sig_hex->valuestring) == 128 &&
+            new_text && cJSON_IsString(new_text)) {
+            uint8_t tgt_sig[64];
+            for (int i = 0; i < 64; i++) {
+                unsigned int v;
+                sscanf(sig_hex->valuestring + (i * 2), "%02x", &v);
+                tgt_sig[i] = (uint8_t)v;
+            }
+            for (size_t h = 0; h < srv->history_count; h++) {
+                if (memcmp(srv->history[h].signature, tgt_sig, 64) == 0) {
+                    wex_msg_action_t act;
+                    memset(&act, 0, sizeof(act));
+                    act.action_type = WEX_ACTION_EDIT;
+                    memcpy(act.target_sig, tgt_sig, 64);
+                    memcpy(act.space_id, srv->history[h].space_id, 32);
+                    strncpy(act.channel, srv->history[h].channel, sizeof(act.channel) - 1);
+                    strncpy(act.payload, new_text->valuestring, sizeof(act.payload) - 1);
+                    act.timestamp_ms = (uint64_t)time(NULL) * 1000ULL;
+                    wex_msg_action_sign(&act, &srv->identity);
+
+                    if (wex_msg_action_apply(&srv->reactions, NULL, &srv->history[h], &act) == 0) {
+                        wex_p2p_send_action(&srv->p2p, act.space_id, &act);
+                        cJSON *out = cJSON_CreateObject();
+                        cJSON_AddStringToObject(out, "type", "message_edited");
+                        cJSON_AddStringToObject(out, "target_sig", sig_hex->valuestring);
+                        cJSON_AddStringToObject(out, "content", srv->history[h].content);
+                        char *json_out = cJSON_PrintUnformatted(out);
+                        if (json_out) {
+                            wex_server_broadcast(srv, json_out);
+                            free(json_out);
+                        }
+                        cJSON_Delete(out);
+                    }
+                    break;
+                }
+            }
+        }
+    } else if (strcmp(action->valuestring, "delete_message") == 0) {
+        cJSON *sig_hex = cJSON_GetObjectItem(root, "target_sig");
+        if (sig_hex && cJSON_IsString(sig_hex) && strlen(sig_hex->valuestring) == 128) {
+            uint8_t tgt_sig[64];
+            for (int i = 0; i < 64; i++) {
+                unsigned int v;
+                sscanf(sig_hex->valuestring + (i * 2), "%02x", &v);
+                tgt_sig[i] = (uint8_t)v;
+            }
+            for (size_t h = 0; h < srv->history_count; h++) {
+                if (memcmp(srv->history[h].signature, tgt_sig, 64) == 0) {
+                    wex_msg_action_t act;
+                    memset(&act, 0, sizeof(act));
+                    act.action_type = WEX_ACTION_DELETE;
+                    memcpy(act.target_sig, tgt_sig, 64);
+                    memcpy(act.space_id, srv->history[h].space_id, 32);
+                    strncpy(act.channel, srv->history[h].channel, sizeof(act.channel) - 1);
+                    act.timestamp_ms = (uint64_t)time(NULL) * 1000ULL;
+                    wex_msg_action_sign(&act, &srv->identity);
+
+                    if (wex_msg_action_apply(&srv->reactions, NULL, &srv->history[h], &act) == 0) {
+                        wex_p2p_send_action(&srv->p2p, act.space_id, &act);
+                        cJSON *out = cJSON_CreateObject();
+                        cJSON_AddStringToObject(out, "type", "message_deleted");
+                        cJSON_AddStringToObject(out, "target_sig", sig_hex->valuestring);
+                        char *json_out = cJSON_PrintUnformatted(out);
+                        if (json_out) {
+                            wex_server_broadcast(srv, json_out);
+                            free(json_out);
+                        }
+                        cJSON_Delete(out);
+                    }
+                    break;
+                }
+            }
+        }
+    } else if (strcmp(action->valuestring, "join_voice") == 0) {
+        cJSON *vch = cJSON_GetObjectItem(root, "channel");
+        const char *vc = (vch && cJSON_IsString(vch)) ? vch->valuestring : "voice-lounge";
+        wex_voice_room_init(&srv->voice_room, vc, (uint32_t)srv->udp_port);
+        srv->voice_room.is_in_call = true;
+        cJSON *out = cJSON_CreateObject();
+        cJSON_AddStringToObject(out, "type", "voice_state");
+        cJSON_AddBoolToObject(out, "connected", true);
+        cJSON_AddStringToObject(out, "channel", srv->voice_room.channel);
+        char *json_out = cJSON_PrintUnformatted(out);
+        if (json_out) {
+            wex_server_broadcast(srv, json_out);
+            free(json_out);
+        }
+        cJSON_Delete(out);
+    } else if (strcmp(action->valuestring, "leave_voice") == 0) {
+        srv->voice_room.is_in_call = false;
+        cJSON *out = cJSON_CreateObject();
+        cJSON_AddStringToObject(out, "type", "voice_state");
+        cJSON_AddBoolToObject(out, "connected", false);
+        cJSON_AddStringToObject(out, "channel", "");
+        char *json_out = cJSON_PrintUnformatted(out);
+        if (json_out) {
+            wex_server_broadcast(srv, json_out);
+            free(json_out);
+        }
+        cJSON_Delete(out);
+    } else if (strcmp(action->valuestring, "voice_data") == 0) {
+        cJSON *b64 = cJSON_GetObjectItem(root, "data_base64");
+        if (b64 && cJSON_IsString(b64) && srv->voice_room.is_in_call) {
+            size_t audio_len = 0;
+            uint8_t *audio_bytes = wex_b64_decode(b64->valuestring, &audio_len);
+            if (audio_bytes && audio_len > 0) {
+                wex_voice_hdr_t vhdr;
+                wex_voice_create_header(&srv->voice_room, &vhdr, audio_len);
+
+                wex_p2p_send_voice_frame(&srv->p2p, srv->spaces[0].space_id, srv->voice_room.channel, &vhdr, audio_bytes, audio_len);
+                free(audio_bytes);
             }
         }
     }

@@ -51,6 +51,7 @@ typedef struct {
     struct sockaddr_in participants[WEX_VOICE_MAX_PARTICIPANTS];
     size_t participant_count;
     bool is_in_call;
+    wex_jitter_buffer_t jitter;
 } wex_voice_room_t;
 
 /* Initialize voice room */

@@ -56,6 +56,8 @@ Wex-Chat is an uncompromising privacy-first communication protocol designed to e
 │   ├── wex_blob.h          # Chunked P2P file/avatar engine & BLAKE2b
 │   ├── wex_config.h        # Configuration file parser (wex.conf)
 │   ├── wex_voice.h         # Voice framing, 48kHz RTP clock, jitter buffer
+│   ├── wex_permissions.h  # RBAC, member permissions & cryptographic bans
+│   ├── wex_actions.h      # Emoji reactions, message edits & deletions
 │   └── wex_ws_server.h     # High-speed non-blocking WebSocket & HTTP server
 ├── src/                    # Implementation sources
 │   ├── crypto/             # Crypto engine & key derivation
@@ -84,7 +86,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build
 ```
 
-### Running All 12 Automated Test Suites
+### Running All 15 Automated Test Suites
 ```bash
 ctest --test-dir build --output-on-failure
 ```

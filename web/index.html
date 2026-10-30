@@ -74,6 +74,25 @@
     .attachment-card { display: inline-flex; align-items: center; gap: 8px; background: var(--bg-darkest); padding: 8px 12px; border-radius: 6px; margin-top: 6px; border: 1px solid var(--bg-light); text-decoration: none; color: var(--text-normal); cursor: pointer; }
     .attachment-card:hover { border-color: var(--accent); color: #fff; }
     .attachment-preview img { max-width: 340px; max-height: 240px; border-radius: 8px; margin-top: 6px; display: block; border: 1px solid var(--bg-light); }
+
+    /* Voice Channel & Actions */
+    .voice-channel { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: 14px; }
+    .voice-channel:hover { background: var(--bg-light); color: var(--text-normal); }
+    .voice-channel.connected { color: var(--green); font-weight: bold; background: #23a55a1a; }
+    .voice-channel::before { content: '🔊'; margin-right: 6px; font-size: 14px; }
+    
+    .voice-status-bar { background: #111214; padding: 8px 12px; border-top: 1px solid var(--bg-darkest); display: none; align-items: center; justify-content: space-between; }
+    .voice-status-bar.active { display: flex; }
+    .voice-conn-title { font-size: 12px; color: var(--green); font-weight: bold; }
+    .voice-conn-sub { font-size: 10px; color: var(--text-muted); }
+
+    .msg-group { position: relative; }
+    .msg-group:hover .msg-actions { display: flex; }
+    .msg-actions { position: absolute; right: 16px; top: -10px; background: var(--bg-darker); border: 1px solid var(--bg-light); border-radius: 6px; padding: 2px 4px; display: none; gap: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); z-index: 10; }
+    .action-btn { background: none; border: none; font-size: 13px; cursor: pointer; padding: 2px 4px; border-radius: 4px; color: var(--text-muted); }
+    .action-btn:hover { background: var(--bg-light); color: #fff; }
+    
+    .reaction-bar { display: flex; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--accent); }
     
     .input-box { padding: 16px; background: var(--bg-dark); }
     .input-wrapper { background: var(--bg-light); border-radius: 8px; padding: 6px 12px; display: flex; align-items: center; gap: 8px; }
@@ -108,6 +127,22 @@
     <div class="section-title">P2P Соседи (UDP)</div>
     <div class="peers-list" id="peer-container">
       <div style="font-size:12px; color:var(--text-muted); padding: 4px;">Поиск пиров в сети...</div>
+    </div>
+
+    <div class="section-title">Голосовые каналы (Opus 48kHz)</div>
+    <div class="channel-list" style="flex:0 0 auto; max-height:80px;">
+      <div class="voice-channel" id="voice-btn" onclick="toggleVoiceConnect('voice-lounge')">
+        <span>voice-lounge</span>
+        <span id="voice-badge" style="font-size:10px; color:var(--text-muted)">Подключиться</span>
+      </div>
+    </div>
+    
+    <div class="voice-status-bar" id="voice-bar">
+      <div class="voice-conn-info">
+        <div class="voice-conn-title">● Голос подключен</div>
+        <div class="voice-conn-sub" id="voice-sub">voice-lounge / P2P UDP</div>
+      </div>
+      <button class="btn secondary" style="padding:4px 8px; font-size:10px;" onclick="toggleVoiceConnect('voice-lounge')">Выйти</button>
     </div>
 
     <div class="user-footer">
@@ -149,6 +184,7 @@
     let peersCache = [];
     let openDms = new Set();
     let blobCache = {};
+    let voiceConnected = false;
 
     function connectWS() {
       const loc = window.location;
@@ -184,10 +220,35 @@
             document.getElementById('messages').innerHTML = '';
             data.history.forEach(appendMessage);
           }
+          if (data.voice) {
+            voiceConnected = data.voice.connected;
+            document.getElementById('voice-bar').classList.toggle('active', data.voice.connected);
+            document.getElementById('voice-btn').classList.toggle('connected', data.voice.connected);
+            document.getElementById('voice-badge').innerText = data.voice.connected ? 'Подключен' : 'Подключиться';
+          }
         } else if (data.type === 'peer_joined' || data.type === 'peer_left') {
           ws.send(JSON.stringify({ action: 'get_status' }));
         } else if (data.type === 'message') {
           appendMessage(data);
+        } else if (data.type === 'reaction_updated') {
+          const el = document.getElementById('reacts-' + data.target_sig);
+          if (el) el.innerText = data.summary;
+        } else if (data.type === 'message_edited') {
+          const el = document.getElementById('content-' + data.target_sig);
+          if (el) el.innerText = data.content + ' (ред.)';
+        } else if (data.type === 'message_deleted') {
+          const el = document.getElementById('content-' + data.target_sig);
+          if (el) {
+            el.innerText = '[Сообщение удалено]';
+            el.style.color = 'var(--text-muted)';
+          }
+        } else if (data.type === 'voice_state') {
+          voiceConnected = data.connected;
+          document.getElementById('voice-bar').classList.toggle('active', data.connected);
+          document.getElementById('voice-btn').classList.toggle('connected', data.connected);
+          document.getElementById('voice-badge').innerText = data.connected ? 'Подключен' : 'Подключиться';
+        } else if (data.type === 'voice_stream') {
+          playVoiceChunk(data.data_base64);
         } else if (data.type === 'blob_data') {
           blobCache[data.hash] = data.data_base64;
           const img = document.getElementById(`img-${data.hash}`);
@@ -353,6 +414,9 @@
       const feed = document.getElementById('messages');
       const group = document.createElement('div');
       group.className = 'msg-group';
+      if (msg.signature) {
+        group.id = 'msg-' + msg.signature;
+      }
       
       const timeStr = new Date(msg.timestamp_ms || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
       const initial = (msg.author || '?').charAt(0).toUpperCase();
@@ -384,16 +448,25 @@
         }
       }
       
+      const sigParam = msg.signature ? `'${msg.signature}'` : "''";
       group.innerHTML = `
         <div class="msg-avatar">${initial}</div>
         <div class="msg-body">
+          <div class="msg-actions">
+            <button class="action-btn" title="Реакция 👍" onclick="sendReaction(${sigParam}, '👍')">👍</button>
+            <button class="action-btn" title="Реакция ❤️" onclick="sendReaction(${sigParam}, '❤️')">❤️</button>
+            <button class="action-btn" title="Реакция 🔥" onclick="sendReaction(${sigParam}, '🔥')">🔥</button>
+            <button class="action-btn" title="Редактировать" onclick="promptEditMessage(${sigParam})">✏️</button>
+            <button class="action-btn" title="Удалить" onclick="deleteMessage(${sigParam})">🗑️</button>
+          </div>
           <div class="msg-meta">
             <span class="msg-author">${msg.author}</span>
             <span class="verified-badge">Ed25519</span>
             ${isDm ? '<span class="e2ee-badge">🔒 E2EE DM</span>' : ''}
             <span class="msg-time">${timeStr}</span>
           </div>
-          <div class="msg-content">${bodyHtml}</div>
+          <div class="msg-content" id="content-${msg.signature || ''}">${bodyHtml}</div>
+          <div class="reaction-bar" id="reacts-${msg.signature || ''}">${msg.reactions || ''}</div>
         </div>
       `;
       feed.appendChild(group);
@@ -455,6 +528,112 @@
         }
       }
     });
+
+    function sendReaction(targetSig, emoji) {
+      if (!targetSig) return;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          action: 'send_reaction',
+          target_sig: targetSig,
+          emoji: emoji
+        }));
+      }
+    }
+
+    function promptEditMessage(targetSig) {
+      if (!targetSig) return;
+      const el = document.getElementById('content-' + targetSig);
+      const oldText = el ? el.innerText.replace(' (ред.)', '') : '';
+      const newText = prompt('Редактировать сообщение:', oldText);
+      if (newText !== null && newText.trim() !== '' && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          action: 'edit_message',
+          target_sig: targetSig,
+          text: newText.trim()
+        }));
+      }
+    }
+
+    function deleteMessage(targetSig) {
+      if (!targetSig) return;
+      if (confirm('Удалить это сообщение для всех?')) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            action: 'delete_message',
+            target_sig: targetSig
+          }));
+        }
+      }
+    }
+
+    let audioCtx = null;
+    let micStream = null;
+
+    async function toggleVoiceConnect(channel) {
+      if (voiceConnected) {
+        if (micStream) {
+          micStream.getTracks().forEach(t => t.stop());
+          micStream = null;
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ action: 'leave_voice' }));
+        }
+      } else {
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+          const source = audioCtx.createMediaStreamSource(micStream);
+          const processor = audioCtx.createScriptProcessor(1024, 1, 1);
+          source.connect(processor);
+          processor.connect(audioCtx.destination);
+          processor.onaudioprocess = (e) => {
+            if (!voiceConnected || !ws || ws.readyState !== WebSocket.OPEN) return;
+            const inputData = e.inputBuffer.getChannelData(0);
+            const pcm16 = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+              pcm16[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+            }
+            const uint8 = new Uint8Array(pcm16.buffer);
+            let binary = '';
+            for (let i = 0; i < uint8.byteLength; i++) binary += String.fromCharCode(uint8[i]);
+            const b64 = btoa(binary);
+            ws.send(JSON.stringify({
+              action: 'voice_data',
+              channel: channel,
+              data_base64: b64
+            }));
+          };
+        } catch (err) {
+          console.warn('Микрофон недоступен, режим только прослушивания:', err);
+        }
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ action: 'join_voice', channel: channel }));
+        }
+      }
+    }
+
+    function playVoiceChunk(b64) {
+      if (!voiceConnected || !b64) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+        const binary = atob(b64);
+        const len = binary.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+        const pcm16 = new Int16Array(bytes.buffer);
+        const floatData = new Float32Array(pcm16.length);
+        for (let i = 0; i < pcm16.length; i++) floatData[i] = pcm16[i] / 32768.0;
+
+        const buffer = audioCtx.createBuffer(1, floatData.length, 48000);
+        buffer.getChannelData(0).set(floatData);
+        const srcNode = audioCtx.createBufferSource();
+        srcNode.buffer = buffer;
+        srcNode.connect(audioCtx.destination);
+        srcNode.start();
+      } catch (e) {
+        console.error('Audio playback error:', e);
+      }
+    }
 
     connectWS();
   </script>

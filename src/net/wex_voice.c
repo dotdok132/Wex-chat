@@ -88,6 +88,7 @@ void wex_voice_room_init(wex_voice_room_t *room, const char *channel, uint32_t s
     room->timestamp_clock = 0;
     room->participant_count = 0;
     room->is_in_call = true;
+    wex_jitter_buffer_init(&room->jitter);
 }
 
 bool wex_voice_room_add_peer(wex_voice_room_t *room, const struct sockaddr_in *addr) {
