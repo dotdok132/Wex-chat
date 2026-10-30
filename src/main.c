@@ -141,6 +141,7 @@ int main(int argc, char **argv) {
             if (journal) wex_journal_close(journal);
             return 1;
         }
+        wex_p2p_set_data_dir(&p2p_node, data_dir);
 
         if (journal) {
             wex_p2p_set_journal(&p2p_node, journal);
@@ -203,6 +204,8 @@ int main(int argc, char **argv) {
     /* Apply persistent identity */
     server.identity = ident;
     server.p2p.identity = &server.identity;
+    memcpy(server.p2p.dht.local_id, server.identity.sign_pk, 32);
+    wex_p2p_set_data_dir(&server.p2p, data_dir);
 
     if (journal) {
         server.journal = journal;

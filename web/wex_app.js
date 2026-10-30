@@ -1,7 +1,8 @@
 /**
  * Wex-Chat — Friendly Consumer Messenger Controller
  * File: web/wex_app.js
- * Clean, cozy, human-friendly UI with rounded chat bubbles and zero technical jargon.
+ * Clean, cozy, human-friendly UI with ISO/IEC 18004 QR Generator & In-App Camera/Image QR Scanner.
+ * Strictly zero emojis across the entire file.
  */
 
 (function () {
@@ -45,6 +46,12 @@
   let voiceChannelName = 'voice-lounge';
   let audioCtx = null;
   let micStream = null;
+
+  /* QR Scanner State */
+  let qrScannerStream = null;
+  let qrScannerTimer = null;
+  let scannerFacingMode = 'environment';
+  let barcodeDetectorInstance = null;
 
   /* Modal State */
   let pendingModalAction = null;
@@ -267,6 +274,16 @@
       };
     }
 
+    // Also detect any embedded 64-char hex key inside a scanned string
+    const hex64Match = trimmed.match(/\b([0-9a-fA-F]{64})\b/);
+    if (hex64Match && trimmed.startsWith('wex://')) {
+      return {
+        raw: trimmed,
+        pk: hex64Match[1].toLowerCase(),
+        ipPort: peerMatch ? peerMatch[1] : null
+      };
+    }
+
     return { raw: trimmed, pk: null, ipPort: trimmed };
   }
 
@@ -336,6 +353,13 @@
 
     document.body.classList.add('chat-active');
     document.body.classList.remove('drawer-open');
+
+    if (ws && ws.readyState === WebSocket.OPEN && isValidHex64(currentDmPeerPk)) {
+      ws.send(JSON.stringify({
+        action: 'sync_dm',
+        target_pk: currentDmPeerPk
+      }));
+    }
 
     updateChatHeader();
     renderContactList();
@@ -410,109 +434,623 @@
     }
   }
 
-  /* ======================== PASTEL-PURPLE ROUNDED QR / KEY CANVAS RENDERER ======================== */
-  function drawRoundedRect(ctx, x, y, w, h, r) {
-    const radius = Math.min(r, w / 2, h / 2);
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.arcTo(x + w, y, x + w, y + h, radius);
-    ctx.arcTo(x + w, y + h, x, y + h, radius);
-    ctx.arcTo(x, y + h, x, y, radius);
-    ctx.arcTo(x, y, x + w, y, radius);
-    ctx.closePath();
-    ctx.fill();
+  /* =========================================================================
+     ISO/IEC 18004 QR CODE GENERATOR (VERSION 4-L, 33x33 MATRIX, REED-SOLOMON)
+     + PURE-JS OPTICAL MATRIX DECODER FOR IN-APP CAMERA & IMAGE SCANNING
+     ========================================================================= */
+  const QR_V4_SIZE = 33;
+  const QR_V4_DATA_CODEWORDS = 80;
+  const QR_V4_EC_CODEWORDS = 20;
+
+  const GF_EXP = new Uint8Array(512);
+  const GF_LOG = new Uint8Array(256);
+  (function initGaloisField() {
+    let x = 1;
+    for (let i = 0; i < 255; i++) {
+      GF_EXP[i] = x;
+      GF_LOG[x] = i;
+      x <<= 1;
+      if (x & 0x100) x ^= 0x11d;
+    }
+    for (let i = 255; i < 512; i++) {
+      GF_EXP[i] = GF_EXP[i - 255];
+    }
+  })();
+
+  function gfMul(a, b) {
+    if (a === 0 || b === 0) return 0;
+    return GF_EXP[GF_LOG[a] + GF_LOG[b]];
   }
 
-  function drawFinderPattern(ctx, ox, oy, cellSize, accentColor, darkColor, bgColor) {
-    ctx.fillStyle = accentColor;
-    drawRoundedRect(ctx, ox * cellSize, oy * cellSize, 7 * cellSize, 7 * cellSize, cellSize * 1.6);
+  function computeReedSolomonEc(dataBytes, ecLen) {
+    let gen = [1];
+    for (let i = 0; i < ecLen; i++) {
+      const next = new Array(gen.length + 1).fill(0);
+      const root = GF_EXP[i];
+      for (let j = 0; j < gen.length; j++) {
+        next[j] ^= gen[j];
+        next[j + 1] ^= gfMul(gen[j], root);
+      }
+      gen = next;
+    }
 
-    ctx.fillStyle = bgColor;
-    drawRoundedRect(ctx, (ox + 1) * cellSize, (oy + 1) * cellSize, 5 * cellSize, 5 * cellSize, cellSize * 1.1);
+    const msg = new Uint8Array(dataBytes.length + ecLen);
+    msg.set(dataBytes, 0);
 
-    ctx.fillStyle = darkColor;
-    drawRoundedRect(ctx, (ox + 2) * cellSize, (oy + 2) * cellSize, 3 * cellSize, 3 * cellSize, cellSize * 0.8);
+    for (let i = 0; i < dataBytes.length; i++) {
+      const coef = msg[i];
+      if (coef !== 0) {
+        for (let j = 0; j < gen.length; j++) {
+          msg[i + j] ^= gfMul(gen[j], coef);
+        }
+      }
+    }
+    return msg.slice(dataBytes.length);
+  }
+
+  function createQrV4FunctionTemplate() {
+    const N = QR_V4_SIZE;
+    const isFunc = Array.from({ length: N }, () => new Uint8Array(N));
+    const mod = Array.from({ length: N }, () => new Uint8Array(N));
+
+    function placeFinder(ox, oy) {
+      for (let r = -1; r <= 7; r++) {
+        for (let c = -1; c <= 7; c++) {
+          const rr = oy + r;
+          const cc = ox + c;
+          if (rr < 0 || rr >= N || cc < 0 || cc >= N) continue;
+          isFunc[rr][cc] = 1;
+          if (r >= 0 && r <= 6 && c >= 0 && c <= 6) {
+            const border = r === 0 || r === 6 || c === 0 || c === 6;
+            const inner = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+            mod[rr][cc] = (border || inner) ? 1 : 0;
+          } else {
+            mod[rr][cc] = 0;
+          }
+        }
+      }
+    }
+
+    placeFinder(0, 0);
+    placeFinder(N - 7, 0);
+    placeFinder(0, N - 7);
+
+    // Alignment pattern at (26, 26) for Version 4
+    const ax = 26;
+    const ay = 26;
+    for (let r = -2; r <= 2; r++) {
+      for (let c = -2; c <= 2; c++) {
+        const rr = ay + r;
+        const cc = ax + c;
+        isFunc[rr][cc] = 1;
+        const dist = Math.max(Math.abs(r), Math.abs(c));
+        mod[rr][cc] = (dist === 2 || dist === 0) ? 1 : 0;
+      }
+    }
+
+    // Timing patterns on row 6 and col 6
+    for (let i = 8; i < N - 8; i++) {
+      isFunc[6][i] = 1;
+      mod[6][i] = (i % 2 === 0) ? 1 : 0;
+      isFunc[i][6] = 1;
+      mod[i][6] = (i % 2 === 0) ? 1 : 0;
+    }
+
+    // Dark module and reserved format information areas
+    isFunc[N - 8][8] = 1;
+    mod[N - 8][8] = 1;
+
+    for (let i = 0; i <= 8; i++) {
+      if (i !== 6) {
+        isFunc[8][i] = 1;
+        isFunc[i][8] = 1;
+      }
+    }
+    for (let i = 0; i < 8; i++) {
+      isFunc[8][N - 1 - i] = 1;
+    }
+    for (let i = 0; i < 7; i++) {
+      isFunc[N - 1 - i][8] = 1;
+    }
+
+    // Write Format Info for Level L (01) and Mask 0 (000) -> BCH(15,5)
+    let fmtData = (0x01 << 3) | 0x00; // 01000
+    let rem = fmtData << 10;
+    for (let i = 14; i >= 10; i--) {
+      if ((rem >>> i) & 1) rem ^= (0x537 << (i - 10));
+    }
+    const fmtBits = ((fmtData << 10) | rem) ^ 0x5412;
+
+    const fmtCoordsA = [
+      [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
+      [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8]
+    ];
+    const fmtCoordsB = [
+      [N - 1, 8], [N - 2, 8], [N - 3, 8], [N - 4, 8], [N - 5, 8], [N - 6, 8], [N - 7, 8],
+      [8, N - 8], [8, N - 7], [8, N - 6], [8, N - 5], [8, N - 4], [8, N - 3], [8, N - 2], [8, N - 1]
+    ];
+
+    for (let i = 0; i < 15; i++) {
+      const bit = (fmtBits >>> i) & 1;
+      mod[fmtCoordsA[i][0]][fmtCoordsA[i][1]] = bit;
+      mod[fmtCoordsB[i][0]][fmtCoordsB[i][1]] = bit;
+    }
+
+    return { N, isFunc, mod };
+  }
+
+  function normalizeQrPayload(rawKeyOrUri) {
+    const clean = (rawKeyOrUri || '').trim();
+    if (isValidHex64(clean)) {
+      return 'wex://?pk=' + clean.toLowerCase();
+    }
+    const parsed = parseTargetInput(clean);
+    if (parsed.pk) {
+      return 'wex://?pk=' + parsed.pk.toLowerCase();
+    }
+    return clean.substring(0, 74) || 'wex://?pk=' + '0'.repeat(64);
+  }
+
+  function buildIsoQrV4Matrix(payloadStr) {
+    const text = normalizeQrPayload(payloadStr);
+    const utf8 = new TextEncoder().encode(text);
+    const len = Math.min(utf8.length, 78);
+
+    const bits = [];
+    function pushBits(val, count) {
+      for (let i = count - 1; i >= 0; i--) {
+        bits.push((val >>> i) & 1);
+      }
+    }
+
+    // Byte mode indicator (0100) + 8-bit byte count
+    pushBits(0x04, 4);
+    pushBits(len, 8);
+    for (let i = 0; i < len; i++) {
+      pushBits(utf8[i], 8);
+    }
+
+    // Terminator up to 4 zero bits
+    const maxDataBits = QR_V4_DATA_CODEWORDS * 8;
+    for (let i = 0; i < 4 && bits.length < maxDataBits; i++) {
+      bits.push(0);
+    }
+    while (bits.length % 8 !== 0) {
+      bits.push(0);
+    }
+
+    const dataBytes = new Uint8Array(QR_V4_DATA_CODEWORDS);
+    const filledBytes = bits.length >>> 3;
+    for (let i = 0; i < filledBytes; i++) {
+      let b = 0;
+      for (let j = 0; j < 8; j++) {
+        b = (b << 1) | bits[i * 8 + j];
+      }
+      dataBytes[i] = b;
+    }
+    const padBytes = [0xec, 0x11];
+    for (let i = filledBytes; i < QR_V4_DATA_CODEWORDS; i++) {
+      dataBytes[i] = padBytes[(i - filledBytes) & 1];
+    }
+
+    const ecBytes = computeReedSolomonEc(dataBytes, QR_V4_EC_CODEWORDS);
+    const allBytes = new Uint8Array(QR_V4_DATA_CODEWORDS + QR_V4_EC_CODEWORDS);
+    allBytes.set(dataBytes, 0);
+    allBytes.set(ecBytes, QR_V4_DATA_CODEWORDS);
+
+    const { N, isFunc, mod } = createQrV4FunctionTemplate();
+
+    let bitIdx = 0;
+    const totalBits = allBytes.length * 8;
+    let upward = true;
+
+    for (let rightCol = N - 1; rightCol >= 1; rightCol -= 2) {
+      if (rightCol === 6) rightCol = 5;
+      for (let vert = 0; vert < N; vert++) {
+        const r = upward ? (N - 1 - vert) : vert;
+        for (let lr = 0; lr < 2; lr++) {
+          const c = rightCol - lr;
+          if (isFunc[r][c]) continue;
+          let bit = 0;
+          if (bitIdx < totalBits) {
+            bit = (allBytes[bitIdx >>> 3] >>> (7 - (bitIdx & 7))) & 1;
+            bitIdx++;
+          }
+          // Mask 0: (r + c) % 2 === 0
+          if ((r + c) % 2 === 0) bit ^= 1;
+          mod[r][c] = bit;
+        }
+      }
+      upward = !upward;
+    }
+
+    return mod;
+  }
+
+  function decodeIsoQrV4Matrix(modGrid) {
+    if (!modGrid || modGrid.length !== QR_V4_SIZE) return null;
+    const { N, isFunc } = createQrV4FunctionTemplate();
+
+    const bits = [];
+    let upward = true;
+    for (let rightCol = N - 1; rightCol >= 1; rightCol -= 2) {
+      if (rightCol === 6) rightCol = 5;
+      for (let vert = 0; vert < N; vert++) {
+        const r = upward ? (N - 1 - vert) : vert;
+        for (let lr = 0; lr < 2; lr++) {
+          const c = rightCol - lr;
+          if (isFunc[r][c]) continue;
+          let bit = modGrid[r][c] ? 1 : 0;
+          if ((r + c) % 2 === 0) bit ^= 1;
+          bits.push(bit);
+        }
+      }
+      upward = !upward;
+    }
+
+    function readBits(offset, count) {
+      let val = 0;
+      for (let i = 0; i < count; i++) {
+        val = (val << 1) | (bits[offset + i] || 0);
+      }
+      return val;
+    }
+
+    const mode = readBits(0, 4);
+    if (mode !== 0x04) return null;
+    const byteLen = readBits(4, 8);
+    if (byteLen <= 0 || byteLen > 78) return null;
+
+    const out = new Uint8Array(byteLen);
+    for (let i = 0; i < byteLen; i++) {
+      out[i] = readBits(12 + i * 8, 8);
+    }
+
+    try {
+      const str = new TextDecoder().decode(out);
+      const parsed = parseTargetInput(str);
+      if (parsed.pk || str.startsWith('wex://')) {
+        return str;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function decodeWexQrFromImageData(imageData) {
+    if (!imageData || !imageData.data || !imageData.width || !imageData.height) return null;
+    const { data, width, height } = imageData;
+
+    // 1. Compute luminance threshold and locate bounding box of dark QR modules
+    let minLum = 255;
+    let maxLum = 0;
+    for (let i = 0; i < data.length; i += 16) {
+      const lum = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+      if (lum < minLum) minLum = lum;
+      if (lum > maxLum) maxLum = lum;
+    }
+    const threshold = (minLum + maxLum) >> 1;
+
+    function isDarkPixel(x, y) {
+      const idx = (y * width + x) * 4;
+      if (data[idx + 3] < 128) return false;
+      const lum = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
+      return lum < threshold;
+    }
+
+    // Restrict scan region to central 92% of image to ignore outer frame borders
+    const marginX = Math.floor(width * 0.04);
+    const marginY = Math.floor(height * 0.04);
+
+    let minX = width;
+    let maxX = 0;
+    let minY = height;
+    let maxY = 0;
+
+    for (let y = marginY; y < height - marginY; y++) {
+      for (let x = marginX; x < width - marginX; x++) {
+        if (isDarkPixel(x, y)) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    const boxW = maxX - minX + 1;
+    const boxH = maxY - minY + 1;
+    if (boxW < QR_V4_SIZE || boxH < QR_V4_SIZE) return null;
+
+    const N = QR_V4_SIZE;
+    const modGrid = Array.from({ length: N }, () => new Uint8Array(N));
+
+    for (let r = 0; r < N; r++) {
+      const sy = Math.min(height - 1, Math.floor(minY + ((r + 0.5) * boxH) / N));
+      for (let c = 0; c < N; c++) {
+        const sx = Math.min(width - 1, Math.floor(minX + ((c + 0.5) * boxW) / N));
+        modGrid[r][c] = isDarkPixel(sx, sy) ? 1 : 0;
+      }
+    }
+
+    return decodeIsoQrV4Matrix(modGrid);
   }
 
   function renderKeyMatrixCanvas(canvasOrId, hexKey) {
     const canvas = typeof canvasOrId === 'string' ? document.getElementById(canvasOrId) : canvasOrId;
     if (!canvas || !canvas.getContext) return;
 
-    const cleanHex = (hexKey || '').replace(/[^0-9a-fA-F]/g, '').padEnd(64, '0');
-    const bytes = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) {
-      bytes[i] = parseInt(cleanHex.substr(i * 2, 2), 16) || 0;
-    }
+    const matrix = buildIsoQrV4Matrix(hexKey || myPublicKey || '0'.repeat(64));
+    const N = matrix.length;
+    const quietZone = 4;
+    const totalModules = N + quietZone * 2;
 
-    const gridSize = 21;
-    const size = canvas.width || 168;
-    const padding = 10;
-    const innerSize = size - padding * 2;
-    const cellSize = Math.floor(innerSize / gridSize);
-    const offset = Math.floor((size - cellSize * gridSize) / 2);
+    const targetSize = canvas.width || 205;
+    const cellSize = Math.max(3, Math.floor(targetSize / totalModules));
+    const actualSize = cellSize * totalModules;
+    const offset = Math.floor((targetSize - actualSize) / 2);
 
     const ctx = canvas.getContext('2d');
     const bgColor = '#f5f3ff';
     const fgPrimary = '#181622';
-    const fgAccent = '#7c6ae6';
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = bgColor;
-    drawRoundedRect(ctx, 0, 0, canvas.width, canvas.height, 14);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.save();
-    ctx.translate(offset, offset);
-
-    drawFinderPattern(ctx, 0, 0, cellSize, fgAccent, fgPrimary, bgColor);
-    drawFinderPattern(ctx, gridSize - 7, 0, cellSize, fgAccent, fgPrimary, bgColor);
-    drawFinderPattern(ctx, 0, gridSize - 7, cellSize, fgAccent, fgPrimary, bgColor);
-
-    for (let i = 8; i < gridSize - 8; i++) {
-      if (i % 2 === 0) {
-        ctx.fillStyle = fgAccent;
-        drawRoundedRect(ctx, i * cellSize + 0.5, 6 * cellSize + 0.5, cellSize - 1, cellSize - 1, cellSize * 0.35);
-        drawRoundedRect(ctx, 6 * cellSize + 0.5, i * cellSize + 0.5, cellSize - 1, cellSize - 1, cellSize * 0.35);
-      }
-    }
-
-    let bitIdx = 0;
-    for (let r = 0; r < gridSize; r++) {
-      for (let c = 0; c < gridSize; c++) {
-        const inTL = r < 8 && c < 8;
-        const inTR = r < 8 && c >= gridSize - 8;
-        const inBL = r >= gridSize - 8 && c < 8;
-        const isTiming = r === 6 || c === 6;
-        if (inTL || inTR || inBL || isTiming) continue;
-
-        const byteA = bytes[bitIdx % 32];
-        const byteB = bytes[(bitIdx * 7 + r * 3 + c * 5) % 32];
-        const shift = (bitIdx + r + c) % 8;
-        const bit = ((byteA ^ byteB) >> shift) & 1;
-
-        if (bit === 1) {
-          ctx.fillStyle = ((r + c) % 3 === 0) ? fgAccent : fgPrimary;
-          drawRoundedRect(
-            ctx,
-            c * cellSize + 0.5,
-            r * cellSize + 0.5,
-            cellSize - 1,
-            cellSize - 1,
-            cellSize * 0.4
+    ctx.fillStyle = fgPrimary;
+    for (let r = 0; r < N; r++) {
+      for (let c = 0; c < N; c++) {
+        if (matrix[r][c]) {
+          ctx.fillRect(
+            offset + (c + quietZone) * cellSize,
+            offset + (r + quietZone) * cellSize,
+            cellSize,
+            cellSize
           );
         }
-        bitIdx++;
       }
     }
-
-    ctx.restore();
   }
 
   function renderAllKeyCanvases(hexKey) {
-    const ids = ['profile-qr-canvas', 'identity-qr-canvas', 'qr-canvas', 'key-matrix-canvas'];
+    const keyToRender = hexKey || myPublicKey;
+    if (!keyToRender) return;
+    const ids = ['profile-qr-canvas', 'invite-qr-canvas', 'identity-qr-canvas', 'qr-canvas', 'key-matrix-canvas'];
     ids.forEach((id) => {
       const c = document.getElementById(id);
-      if (c) renderKeyMatrixCanvas(c, hexKey);
+      if (c) renderKeyMatrixCanvas(c, keyToRender);
     });
+  }
+
+  /* ======================== IN-APP CAMERA & IMAGE QR SCANNER ======================== */
+  function ensureQrScannerElements() {
+    // Ensure #invite-qr-canvas exists inside #modal-invite if not already present
+    const inviteModal = document.getElementById('modal-invite');
+    if (inviteModal && !document.getElementById('invite-qr-canvas')) {
+      const card = inviteModal.querySelector('.modal-card');
+      const header = inviteModal.querySelector('.modal-header');
+      if (card && header) {
+        const qrWrap = document.createElement('div');
+        qrWrap.className = 'qr-container';
+        qrWrap.innerHTML = `
+          <canvas id="invite-qr-canvas" width="205" height="205"></canvas>
+          <span class="qr-caption">Покажите этот QR-код другу или отсканируйте его камерой</span>
+        `;
+        header.insertAdjacentElement('afterend', qrWrap);
+      }
+    }
+
+    // Ensure #modal-qr-scanner exists in DOM if not already present
+    if (!document.getElementById('modal-qr-scanner')) {
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.id = 'modal-qr-scanner';
+      modal.onclick = (e) => {
+        if (e.target === modal) closeQrScannerModal();
+      };
+      modal.innerHTML = `
+        <div class="modal-card">
+          <div class="modal-header">
+            <span class="modal-title">Сканировать QR-код друга</span>
+            <button class="modal-close" onclick="closeQrScannerModal()">&times;</button>
+          </div>
+          <div class="qr-scanner-viewport" style="position:relative; width:100%; aspect-ratio:1/1; max-height:280px; background:#12111a; border-radius:16px; overflow:hidden; display:flex; align-items:center; justify-content:center;">
+            <video id="qr-video" playsinline muted autoplay style="width:100%; height:100%; object-fit:cover;"></video>
+            <canvas id="qr-scan-canvas" width="320" height="320" style="display:none;"></canvas>
+          </div>
+          <div id="qr-scanner-status" style="font-size:13px; color:#a39ec4; text-align:center;">
+            Наведите камеру на QR-код друга или выберите фото из галереи
+          </div>
+          <input type="file" id="qr-image-input" accept="image/*" style="display:none" onchange="handleQrImageFile(event)">
+          <div class="modal-actions">
+            <button class="btn" onclick="switchScannerCamera()">Сменить камеру</button>
+            <button class="btn primary" onclick="document.getElementById('qr-image-input').click()">Выбрать фото QR</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+    }
+  }
+
+  function stopQrScannerCamera() {
+    if (qrScannerTimer) {
+      clearInterval(qrScannerTimer);
+      qrScannerTimer = null;
+    }
+    if (qrScannerStream) {
+      qrScannerStream.getTracks().forEach((t) => {
+        try { t.stop(); } catch (e) {}
+      });
+      qrScannerStream = null;
+    }
+    const video = document.getElementById('qr-video');
+    if (video) {
+      video.srcObject = null;
+    }
+  }
+
+  function onQrPayloadDecoded(decodedText) {
+    if (!decodedText) return false;
+    const parsed = parseTargetInput(decodedText);
+    if (!parsed.pk && !decodedText.startsWith('wex://')) {
+      return false;
+    }
+
+    closeQrScannerModal();
+    playIncomingDmTick();
+    showToast('QR-код успешно отсканирован');
+    addContactOrConnect(decodedText);
+    return true;
+  }
+
+  async function scanCurrentVideoFrame() {
+    const video = document.getElementById('qr-video');
+    const scanCanvas = document.getElementById('qr-scan-canvas');
+    if (!video || video.readyState < 2 || ! video.videoWidth) return;
+
+    // 1. Primary native detector (BarcodeDetector in Android WebView / Chrome)
+    if (barcodeDetectorInstance) {
+      try {
+        const barcodes = await barcodeDetectorInstance.detect(video);
+        if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+          if (onQrPayloadDecoded(barcodes[0].rawValue)) return;
+        }
+      } catch (e) {}
+    }
+
+    // 2. Built-in pure-JS optical matrix decoder fallback
+    if (scanCanvas && scanCanvas.getContext) {
+      const ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+      const w = scanCanvas.width || 320;
+      const h = scanCanvas.height || 320;
+      ctx.drawImage(video, 0, 0, w, h);
+      try {
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const decoded = decodeWexQrFromImageData(imgData);
+        if (decoded) {
+          onQrPayloadDecoded(decoded);
+        }
+      } catch (e) {}
+    }
+  }
+
+  async function startQrScannerCamera() {
+    stopQrScannerCamera();
+    const statusEl = document.getElementById('qr-scanner-status');
+    const video = document.getElementById('qr-video');
+
+    if ('BarcodeDetector' in window && !barcodeDetectorInstance) {
+      try {
+        barcodeDetectorInstance = new window.BarcodeDetector({ formats: ['qr_code'] });
+      } catch (e) {
+        barcodeDetectorInstance = null;
+      }
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (statusEl) {
+        statusEl.textContent = 'Камера недоступна в этом режиме — нажмите «Выбрать фото QR» ниже';
+      }
+      return;
+    }
+
+    try {
+      qrScannerStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: scannerFacingMode,
+          width: { ideal: 640 },
+          height: { ideal: 640 }
+        },
+        audio: false
+      });
+
+      if (video) {
+        video.srcObject = qrScannerStream;
+        await video.play().catch(() => {});
+      }
+      if (statusEl) {
+        statusEl.textContent = 'Наведите камеру на QR-код друга';
+      }
+
+      qrScannerTimer = setInterval(scanCurrentVideoFrame, 150);
+    } catch (err) {
+      if (statusEl) {
+        statusEl.textContent = 'Нет доступа к камере — выберите скриншот или фото QR-кода';
+      }
+    }
+  }
+
+  function openQrScannerModal() {
+    ensureQrScannerElements();
+    closeModals();
+    const modal = document.getElementById('modal-qr-scanner');
+    if (modal) {
+      modal.classList.add('open');
+    }
+    startQrScannerCamera();
+  }
+
+  function closeQrScannerModal() {
+    stopQrScannerCamera();
+    const modal = document.getElementById('modal-qr-scanner');
+    if (modal) {
+      modal.classList.remove('open');
+    }
+  }
+
+  function switchScannerCamera() {
+    scannerFacingMode = (scannerFacingMode === 'environment') ? 'user' : 'environment';
+    startQrScannerCamera();
+  }
+
+  function handleQrImageFile(event) {
+    const file = event && event.target && event.target.files ? event.target.files[0] : null;
+    if (!file) return;
+
+    const statusEl = document.getElementById('qr-scanner-status');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = async () => {
+        ensureQrScannerElements();
+        const scanCanvas = document.getElementById('qr-scan-canvas');
+        if (!scanCanvas) return;
+
+        scanCanvas.width = img.width || 320;
+        scanCanvas.height = img.height || 320;
+        const ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, scanCanvas.width, scanCanvas.height);
+
+        // 1. Try native BarcodeDetector first
+        if ('BarcodeDetector' in window) {
+          try {
+            if (!barcodeDetectorInstance) {
+              barcodeDetectorInstance = new window.BarcodeDetector({ formats: ['qr_code'] });
+            }
+            const codes = await barcodeDetectorInstance.detect(scanCanvas);
+            if (codes && codes.length > 0 && codes[0].rawValue) {
+              if (onQrPayloadDecoded(codes[0].rawValue)) return;
+            }
+          } catch (e) {}
+        }
+
+        // 2. Built-in pure-JS optical matrix decoder
+        try {
+          const imgData = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+          const decoded = decodeWexQrFromImageData(imgData);
+          if (decoded && onQrPayloadDecoded(decoded)) {
+            return;
+          }
+        } catch (e) {}
+
+        if (statusEl) {
+          statusEl.textContent = 'Не удалось распознать QR-код на изображении. Попробуйте другое фото.';
+        }
+        showToast('QR-код на фото не найден');
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
   }
 
   /* ======================== SOFT AUDIO NOTIFICATION ======================== */
@@ -531,8 +1069,8 @@
       const gain = audioCtx.createGain();
 
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, now); // D5 soft chime
-      osc.frequency.exponentialRampToValueAtTime(880.0, now + 0.065); // A5 warm harmonic
+      osc.frequency.setValueAtTime(587.33, now);
+      osc.frequency.exponentialRampToValueAtTime(880.0, now + 0.065);
 
       gain.gain.setValueAtTime(0.001, now);
       gain.gain.exponentialRampToValueAtTime(0.06, now + 0.012);
@@ -643,7 +1181,7 @@
     if (list.length === 0) {
       container.innerHTML = `
         <div class="empty-list-hint">
-          Здесь пока нет чатов. Нажмите «Добавить друга» выше, чтобы начать общение!
+          Здесь пока нет чатов. Нажмите «Написать другу» или «Сканировать QR» выше, чтобы начать общение!
         </div>
       `;
       return;
@@ -834,12 +1372,30 @@
     return false;
   }
 
+  function normalizeAndSortHistory(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const unique = [];
+    for (let i = 0; i < list.length; i++) {
+      const m = list[i];
+      if (!m) continue;
+      if (m.signature) {
+        if (seen.has(m.signature)) continue;
+        seen.add(m.signature);
+      }
+      unique.push(m);
+    }
+    unique.sort((a, b) => (Number(a.timestamp_ms) || 0) - (Number(b.timestamp_ms) || 0));
+    return unique;
+  }
+
   function renderHistory(historyList) {
     const feed = getEl('messages', 'chat-messages');
     if (!feed) return;
     feed.innerHTML = '';
 
-    const filtered = (historyList || []).filter(messageMatchesCurrentConversation);
+    const sorted = normalizeAndSortHistory(historyList || []);
+    const filtered = sorted.filter(messageMatchesCurrentConversation);
     if (filtered.length === 0) {
       if (activeChatMode === 'dm' && currentDmPeerPk) {
         const c = contacts[currentDmPeerPk];
@@ -887,6 +1443,7 @@
     };
 
     const isMine = (msg.author === myNick) || (myPublicKey && msg.author_pk && msg.author_pk.toLowerCase() === myPublicKey.toLowerCase());
+    const isDmMsg = (msg.channel && msg.channel.startsWith('dm:')) || Boolean(msg.encrypted);
     if (isMine) group.classList.add('mine');
 
     const initial = (msg.author || 'Д').charAt(0).toUpperCase();
@@ -936,11 +1493,14 @@
         <div class="msg-content" id="content-${escapeHtml(sig)}">${contentHtml}</div>
         <div class="reaction-bar" id="reacts-${escapeHtml(sig)}">${escapeHtml(msg.reactions || '')}</div>
         <div class="msg-actions">
-          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', '+1')">+1</button>
-          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', 'Нравится')">Нравится</button>
-          <button class="action-btn" onclick="sendReaction('${escapeHtml(sig)}', 'Класс')">Класс</button>
-          ${isMine ? `<button class="action-btn" onclick="promptEditMessage('${escapeHtml(sig)}')">Изменить</button>` : ''}
-          ${isMine ? `<button class="action-btn" onclick="deleteMessage('${escapeHtml(sig)}')">Удалить</button>` : ''}
+          <button class="action-btn" title="Нравится" aria-label="Нравится" onclick="sendReaction('${escapeHtml(sig)}', '+1')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          </button>
+          <button class="action-btn" title="Копировать" aria-label="Копировать" onclick="copyMessageBySig('${escapeHtml(sig)}')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          ${isMine ? `<button class="action-btn" title="Изменить" aria-label="Изменить" onclick="promptEditMessage('${escapeHtml(sig)}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg></button>` : ''}
+          ${(isMine || isDmMsg) ? `<button class="action-btn" title="Удалить у обоих" aria-label="Удалить у обоих" onclick="deleteMessage('${escapeHtml(sig)}')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>` : ''}
         </div>
       </div>
     `;
@@ -1187,6 +1747,19 @@
     }));
   }
 
+  function copyMessageBySig(targetSig) {
+    if (!targetSig) return;
+    const found = historyCache.find((m) => m && m.signature === targetSig);
+    if (found && found.content) {
+      copyTextWithToast(found.content, 'Текст скопирован');
+      return;
+    }
+    const el = document.getElementById('content-' + targetSig);
+    if (el) {
+      copyTextWithToast(el.textContent.replace(' (изм.)', ''), 'Текст скопирован');
+    }
+  }
+
   function promptEditMessage(targetSig) {
     if (!targetSig) return;
     const el = document.getElementById('content-' + targetSig);
@@ -1194,12 +1767,53 @@
     openInputModal('edit_message', targetSig, oldText);
   }
 
+  function removeMessageBySignature(targetSig) {
+    if (!targetSig) return;
+
+    historyCache = historyCache.filter((m) => m && m.signature !== targetSig);
+
+    const el = document.getElementById('content-' + targetSig) || document.getElementById('msg-' + targetSig);
+    if (el) {
+      const grp = el.closest('.msg-group');
+      if (grp) grp.remove();
+      else el.remove();
+    }
+
+    // Update contact last_msg preview from remaining history
+    Object.keys(contacts).forEach((pk) => {
+      const dmCh = dmChannelForPk(pk).toLowerCase();
+      const prefix = pk.toLowerCase().substring(0, 58);
+      const dmMsgs = historyCache.filter((m) => {
+        if (!m || !m.channel) return false;
+        const ch = m.channel.toLowerCase();
+        return ch === dmCh || ch === 'dm:' + prefix;
+      });
+      if (dmMsgs.length > 0) {
+        const last = dmMsgs[dmMsgs.length - 1];
+        contacts[pk].last_msg = last.content || '';
+        contacts[pk].last_ts = last.timestamp_ms || contacts[pk].last_ts || 0;
+      } else {
+        contacts[pk].last_msg = '';
+      }
+    });
+    saveContacts();
+    renderContactList();
+
+    const feed = getEl('messages', 'chat-messages');
+    if (feed && !feed.querySelector('.msg-group')) {
+      renderHistory(historyCache);
+    }
+  }
+
   function deleteMessage(targetSig) {
-    if (!targetSig || !ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({
-      action: 'delete_message',
-      target_sig: targetSig
-    }));
+    if (!targetSig) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        action: 'delete_message',
+        target_sig: targetSig
+      }));
+    }
+    removeMessageBySignature(targetSig);
     showToast('Сообщение удалено');
   }
 
@@ -1277,13 +1891,18 @@
 
   /* ======================== MODALS ======================== */
   function closeModals() {
+    stopQrScannerCamera();
     document.querySelectorAll('.modal-overlay').forEach((m) => m.classList.remove('open'));
     pendingModalAction = null;
     pendingTargetSig = null;
   }
 
   function openInviteModal() {
+    ensureQrScannerElements();
     renderIdentityPanel();
+    if (myPublicKey) {
+      renderAllKeyCanvases(myPublicKey);
+    }
     const m = getEl('modal-invite');
     if (m) m.classList.add('open');
   }
@@ -1404,7 +2023,7 @@
       }
 
       if (Array.isArray(data.history)) {
-        historyCache = data.history;
+        historyCache = normalizeAndSortHistory(data.history);
       }
 
       mergePeersAndHistoryIntoContacts(peersCache, historyCache);
@@ -1447,9 +2066,14 @@
 
     if (data.type === 'message') {
       const isDup = data.signature && historyCache.some((m) => m.signature === data.signature);
-      if (!isDup) {
-        historyCache.push(data);
-      }
+      if (isDup) return;
+
+      const prevLastTs = historyCache.length > 0
+        ? (Number(historyCache[historyCache.length - 1].timestamp_ms) || 0)
+        : 0;
+      const incomingTs = Number(data.timestamp_ms) || Date.now();
+      historyCache.push(data);
+      historyCache = normalizeAndSortHistory(historyCache);
 
       const isFromMe = (data.author === myNick) || (myPublicKey && data.author_pk && data.author_pk.toLowerCase() === myPublicKey.toLowerCase());
       const isDm = typeof data.channel === 'string' && data.channel.startsWith('dm:');
@@ -1473,7 +2097,7 @@
           upsertContact(peerKey, {
             nickname: (!isFromMe && data.author) ? data.author : (contacts[peerKey] ? contacts[peerKey].nickname : undefined),
             last_msg: data.content || '',
-            last_ts: data.timestamp_ms || Date.now(),
+            last_ts: incomingTs,
             unread: (!isFromMe && !isCurrentlyOpen) ? prevUnread + 1 : 0
           });
           saveContacts();
@@ -1486,7 +2110,11 @@
       }
 
       if (messageMatchesCurrentConversation(data)) {
-        appendMessageToDom(data);
+        if (incomingTs < prevLastTs) {
+          renderHistory(historyCache);
+        } else {
+          appendMessageToDom(data);
+        }
       }
       return;
     }
@@ -1511,11 +2139,7 @@
     }
 
     if (data.type === 'message_deleted') {
-      const el = document.getElementById('content-' + data.target_sig);
-      if (el) {
-        el.textContent = 'Сообщение удалено';
-        el.style.opacity = '0.6';
-      }
+      removeMessageBySignature(data.target_sig);
       return;
     }
 
@@ -1630,6 +2254,7 @@
   /* ======================== INITIALIZATION & GLOBAL EXPORTS ======================== */
   function initWexApp() {
     loadContacts();
+    ensureQrScannerElements();
     bindEvents();
     selectTab('dms');
     renderContactList();
@@ -1671,11 +2296,19 @@
   window.handleFileUpload = handleFileUpload;
   window.downloadBlobAttachment = downloadBlobAttachment;
   window.sendReaction = sendReaction;
+  window.copyMessageBySig = copyMessageBySig;
   window.promptEditMessage = promptEditMessage;
   window.deleteMessage = deleteMessage;
   window.toggleVoiceConnect = toggleVoiceConnect;
   window.toggleMobileDrawer = toggleMobileDrawer;
   window.renderKeyMatrixCanvas = renderKeyMatrixCanvas;
+  window.openQrScannerModal = openQrScannerModal;
+  window.closeQrScannerModal = closeQrScannerModal;
+  window.switchScannerCamera = switchScannerCamera;
+  window.handleQrImageFile = handleQrImageFile;
+  window.buildIsoQrV4Matrix = buildIsoQrV4Matrix;
+  window.decodeIsoQrV4Matrix = decodeIsoQrV4Matrix;
+  window.decodeWexQrFromImageData = decodeWexQrFromImageData;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initWexApp);

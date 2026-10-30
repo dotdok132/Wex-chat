@@ -164,9 +164,12 @@ public class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient());
         webView.setWebChromeClient(new WexChromeClient());
 
-        // Check runtime permissions for mic and push notifications
+        // Check runtime permissions for camera, mic, and push notifications
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             List<String> perms = new ArrayList<String>();
+            if (checkSelfPermission(android.Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                perms.add(android.Manifest.permission.CAMERA);
+            }
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 perms.add(android.Manifest.permission.RECORD_AUDIO);
             }

@@ -1,10 +1,12 @@
 #define _GNU_SOURCE
 #include "wex_persist.h"
+#include "wex_p2p.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #define TEST_PASS(name) printf("  [PASS] %s\n", name)
 
@@ -108,6 +110,94 @@ static void test_journal_persistence(void) {
     TEST_PASS("Append-only Binary Message Journal Persistence & Querying");
 }
 
+static void test_peers_persistence(void) {
+    const char *test_dir = "/tmp/wex_test_contacts_dir";
+    const char *contacts_path = "/tmp/wex_test_contacts_dir/contacts.dat";
+    unlink(contacts_path);
+    wex_mkdir_p(test_dir);
+
+    wex_identity_t self_id, peer1_id, peer2_id;
+    assert(wex_identity_init(&self_id, NULL, "Self_Node") == 0);
+    assert(wex_identity_init(&peer1_id, NULL, "LAN_Friend") == 0);
+    assert(wex_identity_init(&peer2_id, NULL, "Roaming_Friend") == 0);
+
+    /* Initialize node 1 and populate discovered peers (LAN + WAN roaming endpoints) */
+    wex_p2p_node_t node1;
+    assert(wex_p2p_init(&node1, &self_id, 0) == 0);
+
+    node1.peer_count = 2;
+
+    /* Peer 1: LAN endpoint only */
+    memset(&node1.peers[0], 0, sizeof(wex_peer_t));
+    memcpy(node1.peers[0].pk, peer1_id.sign_pk, 32);
+    memcpy(node1.peers[0].x25519_pk, peer1_id.x25519_pk, 32);
+    strncpy(node1.peers[0].nickname, peer1_id.nickname, WEX_NAME_LEN - 1);
+    node1.peers[0].addr.sin_family = AF_INET;
+    inet_pton(AF_INET, "192.168.1.42", &node1.peers[0].addr.sin_addr);
+    node1.peers[0].addr.sin_port = htons(9001);
+    node1.peers[0].has_wan_addr = false;
+    node1.peers[0].active = true;
+
+    /* Peer 2: Both LAN addr and discovered WAN addr for LAN-to-WAN roaming */
+    memset(&node1.peers[1], 0, sizeof(wex_peer_t));
+    memcpy(node1.peers[1].pk, peer2_id.sign_pk, 32);
+    memcpy(node1.peers[1].x25519_pk, peer2_id.x25519_pk, 32);
+    strncpy(node1.peers[1].nickname, peer2_id.nickname, WEX_NAME_LEN - 1);
+    node1.peers[1].addr.sin_family = AF_INET;
+    inet_pton(AF_INET, "192.168.1.99", &node1.peers[1].addr.sin_addr);
+    node1.peers[1].addr.sin_port = htons(9002);
+    node1.peers[1].has_wan_addr = true;
+    node1.peers[1].wan_addr.sin_family = AF_INET;
+    inet_pton(AF_INET, "203.0.113.55", &node1.peers[1].wan_addr.sin_addr);
+    node1.peers[1].wan_addr.sin_port = htons(45000);
+    node1.peers[1].active = true;
+
+    /* Save contacts to disk */
+    assert(wex_peers_save(&node1, contacts_path) == 0);
+    wex_p2p_close(&node1);
+
+    /* Simulate node restart: initialize fresh node2 and restore via wex_p2p_set_data_dir */
+    wex_p2p_node_t node2;
+    assert(wex_p2p_init(&node2, &self_id, 0) == 0);
+    assert(node2.peer_count == 0);
+
+    wex_p2p_set_data_dir(&node2, test_dir);
+    assert(node2.peer_count == 2);
+
+    /* Verify Peer 1 fields */
+    assert(node2.peers[0].active == true);
+    assert(memcmp(node2.peers[0].pk, peer1_id.sign_pk, 32) == 0);
+    assert(memcmp(node2.peers[0].x25519_pk, peer1_id.x25519_pk, 32) == 0);
+    assert(strcmp(node2.peers[0].nickname, "LAN_Friend") == 0);
+    assert(node2.peers[0].addr.sin_port == htons(9001));
+    char ip_buf[32];
+    inet_ntop(AF_INET, &node2.peers[0].addr.sin_addr, ip_buf, sizeof(ip_buf));
+    assert(strcmp(ip_buf, "192.168.1.42") == 0);
+    assert(node2.peers[0].has_wan_addr == false);
+
+    /* Verify Peer 2 fields including WAN roaming endpoint */
+    assert(node2.peers[1].active == true);
+    assert(memcmp(node2.peers[1].pk, peer2_id.sign_pk, 32) == 0);
+    assert(memcmp(node2.peers[1].x25519_pk, peer2_id.x25519_pk, 32) == 0);
+    assert(strcmp(node2.peers[1].nickname, "Roaming_Friend") == 0);
+    assert(node2.peers[1].addr.sin_port == htons(9002));
+    inet_ntop(AF_INET, &node2.peers[1].addr.sin_addr, ip_buf, sizeof(ip_buf));
+    assert(strcmp(ip_buf, "192.168.1.99") == 0);
+    assert(node2.peers[1].has_wan_addr == true);
+    assert(node2.peers[1].wan_addr.sin_port == htons(45000));
+    inet_ntop(AF_INET, &node2.peers[1].wan_addr.sin_addr, ip_buf, sizeof(ip_buf));
+    assert(strcmp(ip_buf, "203.0.113.55") == 0);
+
+    /* Verify DHT routing table was also populated with restored peers */
+    assert(node2.dht.total_contacts >= 2);
+
+    wex_p2p_close(&node2);
+    unlink(contacts_path);
+    rmdir(test_dir);
+
+    TEST_PASS("Peer Contacts (LAN + WAN Roaming Endpoints) Persistence Across Restarts");
+}
+
 int main(void) {
     printf("====================================================\n");
     printf("  Running Wex Persistence & Storage Tests           \n");
@@ -115,6 +205,7 @@ int main(void) {
 
     test_identity_persistence();
     test_journal_persistence();
+    test_peers_persistence();
 
     printf("====================================================\n");
     printf("  ALL PERSISTENCE TESTS PASSED SUCCESSFULLY!        \n");

@@ -9,11 +9,16 @@
 #define WEX_ID_FILE_MAGIC 0x57455849 /* "WEXI" */
 #define WEX_JOURNAL_MAGIC 0x5745584A /* "WEXJ" */
 #define WEX_REC_MAGIC     0x52454331 /* "REC1" */
+#define WEX_PEERS_MAGIC   0x57455850 /* "WEXP" */
 
 /* Identity file persistence */
 int wex_identity_save(const wex_identity_t *ident, const char *path);
 int wex_identity_load(wex_identity_t *ident, const char *path);
 int wex_identity_load_or_create(wex_identity_t *ident, const char *path, const char *default_nick);
+
+/* Persistent contacts / peers storage (contacts.dat) */
+int wex_peers_save(const void *p2p_node_ptr, const char *path);
+int wex_peers_load(void *p2p_node_ptr, const char *path);
 
 /* High-performance append-only message journal */
 typedef struct wex_journal wex_journal_t;

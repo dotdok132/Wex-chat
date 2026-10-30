@@ -229,9 +229,11 @@ static void on_p2p_action_event(const wex_msg_action_t *action, void *user_data)
     if (!srv || !action) return;
 
     wex_chat_msg_t *target_msg = NULL;
+    size_t target_idx = 0;
     for (size_t h = 0; h < srv->history_count; h++) {
         if (memcmp(srv->history[h].signature, action->target_sig, 64) == 0) {
             target_msg = &srv->history[h];
+            target_idx = h;
             break;
         }
     }
@@ -256,6 +258,11 @@ static void on_p2p_action_event(const wex_msg_action_t *action, void *user_data)
         } else if (action->action_type == WEX_ACTION_DELETE) {
             cJSON_AddStringToObject(out, "type", "message_deleted");
             cJSON_AddStringToObject(out, "target_sig", sig_hex);
+            if (target_idx + 1 < srv->history_count) {
+                memmove(&srv->history[target_idx], &srv->history[target_idx + 1],
+                        (srv->history_count - target_idx - 1) * sizeof(wex_chat_msg_t));
+            }
+            srv->history_count--;
         }
         char *json_out = cJSON_PrintUnformatted(out);
         if (json_out) {
@@ -317,6 +324,7 @@ int wex_server_init(wex_server_t *srv, int ws_port, int udp_port, const char *ni
     if (wex_p2p_init(&srv->p2p, &srv->identity, srv->udp_port) != 0) {
         return -1;
     }
+    wex_p2p_set_data_dir(&srv->p2p, "./.wex_data");
     srv->p2p.lan_discovery_enabled = true;
     wex_p2p_set_callbacks(&srv->p2p, on_p2p_incoming_msg, on_p2p_peer_event, srv);
     wex_p2p_set_sync_callback(&srv->p2p, on_p2p_sync_request);
@@ -427,6 +435,10 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
     cJSON_AddItemToObject(root, "spaces", spaces);
     cJSON_AddStringToObject(root, "active_channel", srv->p2p.active_channel);
 
+    struct timespec ts_now;
+    clock_gettime(CLOCK_MONOTONIC, &ts_now);
+    uint64_t now_ms = (uint64_t)ts_now.tv_sec * 1000ULL + (uint64_t)ts_now.tv_nsec / 1000000ULL;
+
     cJSON *peers = cJSON_CreateArray();
     for (size_t p = 0; p < srv->p2p.peer_count; p++) {
         if (srv->p2p.peers[p].active) {
@@ -440,6 +452,10 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
             cJSON_AddStringToObject(peer_obj, "ip", ip_buf);
             cJSON_AddNumberToObject(peer_obj, "port", ntohs(srv->p2p.peers[p].addr.sin_port));
             cJSON_AddBoolToObject(peer_obj, "use_relay", srv->p2p.peers[p].use_relay);
+            bool is_online = (srv->p2p.peers[p].last_seen_ms > 0) &&
+                             (now_ms >= srv->p2p.peers[p].last_seen_ms) &&
+                             (now_ms - srv->p2p.peers[p].last_seen_ms < 45000ULL);
+            cJSON_AddBoolToObject(peer_obj, "online", is_online);
             cJSON_AddItemToArray(peers, peer_obj);
         }
     }
@@ -766,29 +782,15 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
         if (target_pk_json && cJSON_IsString(target_pk_json) && text && cJSON_IsString(text)) {
             uint8_t target_pk[32];
             if (wex_hex_to_id(target_pk_json->valuestring, target_pk) == 0) {
-                wex_p2p_send_dm(&srv->p2p, target_pk, text->valuestring);
+                wex_chat_msg_t local_msg;
+                memset(&local_msg, 0, sizeof(local_msg));
+                wex_p2p_send_dm_ex(&srv->p2p, target_pk, text->valuestring, &local_msg);
 
                 /* Broadcast to local WebSocket UI */
-                char ch_name[64];
                 char target_hex[65];
                 char my_pk_hex[65];
                 wex_id_to_hex(target_pk, target_hex);
                 wex_id_to_hex(srv->identity.sign_pk, my_pk_hex);
-                snprintf(ch_name, sizeof(ch_name), "dm:%.58s", target_hex);
-
-                wex_chat_msg_t local_msg;
-                memset(&local_msg, 0, sizeof(local_msg));
-                if (srv->p2p.space_count > 0) {
-                    memcpy(local_msg.space_id, srv->p2p.active_space_id, WEX_ID_LEN);
-                } else if (srv->space_count > 0) {
-                    memcpy(local_msg.space_id, srv->spaces[0].space_id, WEX_ID_LEN);
-                }
-                strncpy(local_msg.author, srv->identity.nickname, sizeof(local_msg.author) - 1);
-                memcpy(local_msg.author_pk, srv->identity.sign_pk, 32);
-                strncpy(local_msg.channel, ch_name, sizeof(local_msg.channel) - 1);
-                strncpy(local_msg.content, text->valuestring, sizeof(local_msg.content) - 1);
-                local_msg.timestamp_ms = (uint64_t)time(NULL) * 1000ULL;
-                wex_chat_msg_sign(&local_msg, &srv->identity);
                 local_msg.enc_flags = WEX_ENC_DM_E2EE;
 
                 if (srv->history_count < WEX_MAX_HISTORY) {
@@ -1037,6 +1039,11 @@ static void handle_client_json(wex_server_t *srv, int client_fd, const char *pay
 
                     if (wex_msg_action_apply(&srv->reactions, NULL, &srv->history[h], &act) == 0) {
                         wex_p2p_send_action(&srv->p2p, act.space_id, &act);
+                        if (h + 1 < srv->history_count) {
+                            memmove(&srv->history[h], &srv->history[h + 1],
+                                    (srv->history_count - h - 1) * sizeof(wex_chat_msg_t));
+                        }
+                        srv->history_count--;
                         cJSON *out = cJSON_CreateObject();
                         cJSON_AddStringToObject(out, "type", "message_deleted");
                         cJSON_AddStringToObject(out, "target_sig", sig_hex->valuestring);

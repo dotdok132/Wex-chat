@@ -65,6 +65,8 @@ typedef struct {
 /* Peer node tracking */
 typedef struct {
     struct sockaddr_in addr;
+    struct sockaddr_in wan_addr;
+    bool has_wan_addr;
     uint8_t pk[32];
     uint8_t x25519_pk[32];
     char nickname[WEX_NAME_LEN];
@@ -224,6 +226,7 @@ int wex_p2p_send_voice_frame(wex_p2p_node_t *node, const uint8_t space_id[32], c
 
 /* Send encrypted Direct Message (E2EE with X25519 + ChaCha20-Poly1305) */
 int wex_p2p_send_dm(wex_p2p_node_t *node, const uint8_t target_pk[32], const char *text);
+int wex_p2p_send_dm_ex(wex_p2p_node_t *node, const uint8_t target_pk[32], const char *text, wex_chat_msg_t *out_msg);
 
 /* Transit overlay routing: forwards a message toward destination ID through next-hop in DHT */
 int wex_p2p_relay_msg(wex_p2p_node_t *node, const uint8_t dst_id[32], const wex_chat_msg_t *msg);

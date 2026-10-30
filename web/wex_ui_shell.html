@@ -756,9 +756,9 @@
       border-radius: 24px;
       gap: 10px;
     }
-    #profile-qr-canvas {
-      width: 168px;
-      height: 168px;
+    #profile-qr-canvas, #invite-qr-canvas {
+      width: 180px;
+      height: 180px;
       background: #ffffff;
       border-radius: 20px;
       padding: 8px;
@@ -769,6 +769,57 @@
       font-size: 12px;
       color: var(--text-muted);
       text-align: center;
+    }
+
+    /* QR Code Camera Scanner Viewport & Animated Viewfinder */
+    .qr-scanner-viewport {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      max-height: 290px;
+      background: var(--bg-void);
+      border: 1px solid var(--line-strong);
+      border-radius: 20px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #qr-video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .qr-viewfinder-frame {
+      position: absolute;
+      width: 68%;
+      height: 68%;
+      border: 2px solid var(--accent-lavender);
+      border-radius: 22px;
+      box-shadow: 0 0 0 999px rgba(18, 16, 28, 0.48), inset 0 0 20px rgba(184, 169, 255, 0.18);
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .qr-scan-line {
+      position: absolute;
+      left: 8%;
+      right: 8%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent-lavender), #ffffff, var(--accent-lavender), transparent);
+      box-shadow: 0 0 10px var(--accent-lavender);
+      animation: qrScanSweep 2.2s ease-in-out infinite;
+    }
+    @keyframes qrScanSweep {
+      0%, 100% { top: 10%; opacity: 0.65; }
+      50% { top: 88%; opacity: 1; }
+    }
+    #qr-scanner-status {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      text-align: center;
+      padding: 2px 8px;
     }
 
     /* Collapsed Advanced Spoiler at bottom of Profile */
@@ -1420,9 +1471,13 @@
              PANEL 1 (DEFAULT): ЧАТЫ (Direct Messages & Nearby Friends)
              ================================================================= -->
         <section class="tab-panel active" id="panel-dms">
-          <div class="panel-action-row">
+          <div class="panel-action-row" style="flex-wrap: wrap;">
             <button class="btn primary full" id="btn-add-contact" onclick="openConnectModal()">+ Написать другу</button>
-            <button class="btn" id="btn-share-my-key" onclick="openInviteModal()" title="Пригласить друга">Мой QR</button>
+            <button class="btn" style="flex:1" id="btn-scan-qr" onclick="openQrScannerModal()" title="Сканировать QR-код">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3"/></svg>
+              <span>Сканировать QR</span>
+            </button>
+            <button class="btn" style="flex:1" id="btn-share-my-key" onclick="openInviteModal()" title="Показать мой QR-код">Мой QR</button>
           </div>
 
           <!-- Active Direct Message Threads -->
@@ -1645,6 +1700,10 @@
         <span class="modal-title">Пригласить друга</span>
         <button class="modal-close" onclick="closeModals()">&times;</button>
       </div>
+      <div class="qr-container">
+        <canvas id="invite-qr-canvas" width="180" height="180"></canvas>
+        <span class="qr-caption">Пусть друг отсканирует этот QR-код камерой в Wex-Chat</span>
+      </div>
       <div class="field-group">
         <label class="field-label">Ссылка-приглашение в один клик</label>
         <div class="code-box" id="invite-link-box">wex://join/...</div>
@@ -1680,6 +1739,12 @@
         <button class="btn" onclick="pasteIntoInput('connect-target-input')">Вставить</button>
         <button class="btn primary" onclick="submitConnectPeer()">Добавить</button>
       </div>
+      <div class="modal-actions">
+        <button class="btn full" onclick="openQrScannerModal()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><rect x="7" y="7" width="3" height="3"/><rect x="14" y="7" width="3" height="3"/><rect x="7" y="14" width="3" height="3"/><path d="M14 14h3v3"/></svg>
+          <span>Сканировать QR-код камерой</span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1699,6 +1764,31 @@
       <div class="modal-actions">
         <button class="btn" onclick="closeModals()">Отмена</button>
         <button class="btn primary" onclick="submitInputModal()">Готово</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =======================================================================
+       MODAL 4: IN-APP QR CODE SCANNER
+       ======================================================================= -->
+  <div class="modal-overlay" id="modal-qr-scanner" onclick="if(event.target===this)closeQrScannerModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-title">Сканировать QR-код</span>
+        <button class="modal-close" onclick="closeQrScannerModal()">&times;</button>
+      </div>
+      <div class="qr-scanner-viewport">
+        <video id="qr-video" autoplay playsinline muted></video>
+        <canvas id="qr-scan-canvas" style="display:none;"></canvas>
+        <div class="qr-viewfinder-frame">
+          <div class="qr-scan-line"></div>
+        </div>
+      </div>
+      <div id="qr-scanner-status">Наведите камеру на QR-код друга</div>
+      <input type="file" id="qr-file-input" accept="image/*" style="display:none" onchange="handleQrImageFile(event)">
+      <div class="modal-actions">
+        <button class="btn" onclick="document.getElementById('qr-file-input').click()">Выбрать фото с QR</button>
+        <button class="btn" onclick="switchScannerCamera()">Сменить камеру</button>
       </div>
     </div>
   </div>

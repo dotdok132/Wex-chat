@@ -1,7 +1,9 @@
 #define _GNU_SOURCE
 #include "wex_persist.h"
+#include "wex_p2p.h"
 #include "wex_crypto.h"
 #include "../../vendor/monocypher/monocypher.h"
+#include "../../vendor/monocypher/monocypher-ed25519.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +48,23 @@ typedef struct {
     uint8_t  signature[64];
     uint16_t content_len;
 } wex_journal_rec_hdr_t;
+
+typedef struct {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t count;
+} wex_peers_hdr_disk_t;
+
+typedef struct {
+    uint8_t  pk[32];
+    uint8_t  x25519_pk[32];
+    char     nickname[WEX_NAME_LEN];
+    uint32_t lan_ip;
+    uint16_t lan_port;
+    uint8_t  has_wan;
+    uint32_t wan_ip;
+    uint16_t wan_port;
+} wex_peer_rec_disk_t;
 #pragma pack(pop)
 
 struct wex_journal {
@@ -413,4 +432,147 @@ void wex_journal_close(wex_journal_t *journal) {
         journal->fd = -1;
     }
     free(journal);
+}
+
+int wex_peers_save(const void *p2p_node_ptr, const char *path) {
+    if (!p2p_node_ptr || !path) return -1;
+    const wex_p2p_node_t *node = (const wex_p2p_node_t *)p2p_node_ptr;
+
+    char dir_copy[512];
+    strncpy(dir_copy, path, sizeof(dir_copy) - 1);
+    dir_copy[sizeof(dir_copy) - 1] = '\0';
+    char *last_slash = strrchr(dir_copy, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        wex_mkdir_p(dir_copy);
+    }
+
+    uint16_t active_count = 0;
+    for (size_t i = 0; i < node->peer_count && i < WEX_MAX_PEERS; i++) {
+        if (node->peers[i].active) {
+            active_count++;
+        }
+    }
+
+    char tmp_path[560];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%d", path, (int)getpid());
+
+    int fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return -1;
+
+    wex_peers_hdr_disk_t hdr;
+    hdr.magic = htonl(WEX_PEERS_MAGIC);
+    hdr.version = htons(1);
+    hdr.count = htons(active_count);
+
+    if (write(fd, &hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr)) {
+        close(fd);
+        unlink(tmp_path);
+        return -1;
+    }
+
+    for (size_t i = 0; i < node->peer_count && i < WEX_MAX_PEERS; i++) {
+        if (!node->peers[i].active) continue;
+        wex_peer_rec_disk_t rec;
+        memset(&rec, 0, sizeof(rec));
+        memcpy(rec.pk, node->peers[i].pk, 32);
+        memcpy(rec.x25519_pk, node->peers[i].x25519_pk, 32);
+        strncpy(rec.nickname, node->peers[i].nickname, sizeof(rec.nickname) - 1);
+        rec.lan_ip = node->peers[i].addr.sin_addr.s_addr;
+        rec.lan_port = node->peers[i].addr.sin_port;
+        rec.has_wan = node->peers[i].has_wan_addr ? 1 : 0;
+        if (node->peers[i].has_wan_addr) {
+            rec.wan_ip = node->peers[i].wan_addr.sin_addr.s_addr;
+            rec.wan_port = node->peers[i].wan_addr.sin_port;
+        }
+        if (write(fd, &rec, sizeof(rec)) != (ssize_t)sizeof(rec)) {
+            close(fd);
+            unlink(tmp_path);
+            return -1;
+        }
+    }
+
+    fsync(fd);
+    close(fd);
+
+    if (rename(tmp_path, path) != 0) {
+        unlink(tmp_path);
+        return -1;
+    }
+
+    return 0;
+}
+
+int wex_peers_load(void *p2p_node_ptr, const char *path) {
+    if (!p2p_node_ptr || !path) return -1;
+    wex_p2p_node_t *node = (wex_p2p_node_t *)p2p_node_ptr;
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+
+    wex_peers_hdr_disk_t hdr;
+    if (read(fd, &hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr)) {
+        close(fd);
+        return -1;
+    }
+
+    if (ntohl(hdr.magic) != WEX_PEERS_MAGIC || ntohs(hdr.version) != 1) {
+        close(fd);
+        return -1;
+    }
+
+    uint16_t count = ntohs(hdr.count);
+    uint8_t zero_pk[32];
+    memset(zero_pk, 0, 32);
+
+    for (uint16_t i = 0; i < count && i < WEX_MAX_PEERS; i++) {
+        wex_peer_rec_disk_t rec;
+        if (read(fd, &rec, sizeof(rec)) != (ssize_t)sizeof(rec)) {
+            break;
+        }
+        if (memcmp(rec.pk, zero_pk, 32) == 0) continue;
+        if (node->identity && memcmp(rec.pk, node->identity->sign_pk, 32) == 0) continue;
+
+        wex_peer_t *p = NULL;
+        for (size_t j = 0; j < node->peer_count; j++) {
+            if (memcmp(node->peers[j].pk, rec.pk, 32) == 0) {
+                p = &node->peers[j];
+                break;
+            }
+        }
+        if (!p && node->peer_count < WEX_MAX_PEERS) {
+            p = &node->peers[node->peer_count++];
+            memset(p, 0, sizeof(*p));
+        }
+        if (!p) continue;
+
+        memcpy(p->pk, rec.pk, 32);
+        if (memcmp(rec.x25519_pk, zero_pk, 32) != 0) {
+            memcpy(p->x25519_pk, rec.x25519_pk, 32);
+        } else {
+            crypto_eddsa_to_x25519(p->x25519_pk, rec.pk);
+        }
+        strncpy(p->nickname, rec.nickname, sizeof(p->nickname) - 1);
+        p->nickname[sizeof(p->nickname) - 1] = '\0';
+        p->addr.sin_family = AF_INET;
+        p->addr.sin_addr.s_addr = rec.lan_ip;
+        p->addr.sin_port = rec.lan_port;
+        p->has_wan_addr = (rec.has_wan != 0);
+        if (p->has_wan_addr) {
+            p->wan_addr.sin_family = AF_INET;
+            p->wan_addr.sin_addr.s_addr = rec.wan_ip;
+            p->wan_addr.sin_port = rec.wan_port;
+        }
+        p->active = true;
+
+        if (p->addr.sin_port != 0) {
+            wex_dht_update_contact(&node->dht, p->pk, &p->addr, 1);
+        }
+        if (p->has_wan_addr && p->wan_addr.sin_port != 0) {
+            wex_dht_update_contact(&node->dht, p->pk, &p->wan_addr, 1);
+        }
+    }
+
+    close(fd);
+    return 0;
 }
