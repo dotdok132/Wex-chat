@@ -34,6 +34,7 @@
   let myX25519Key = '';
   let myInviteUri = '';
   let myWanEndpoint = '';
+  let myLanEndpoint = '';
   let myDhtCount = 0;
   let myOfflineShards = 0;
   let myExportedSeed = '';
@@ -255,42 +256,52 @@
   /* ======================== PARSE URI / PUBLIC KEY / TARGET ======================== */
   function parseTargetInput(rawInput) {
     const trimmed = (rawInput || '').trim();
-    if (!trimmed) return { raw: '', pk: null, ipPort: null };
+    if (!trimmed) return { raw: '', pk: null, ipPort: null, wan: null, lan: null };
 
     if (isValidHex64(trimmed)) {
-      return { raw: trimmed, pk: trimmed.toLowerCase(), ipPort: null };
+      return { raw: trimmed, pk: trimmed.toLowerCase(), ipPort: null, wan: null, lan: null };
     }
 
     const atIdx = trimmed.indexOf('@');
     if (atIdx === 64 && isValidHex64(trimmed.substring(0, 64))) {
+      const ep = trimmed.substring(65);
       return {
         raw: trimmed,
         pk: trimmed.substring(0, 64).toLowerCase(),
-        ipPort: trimmed.substring(65)
+        ipPort: ep,
+        wan: ep,
+        lan: null
       };
     }
 
     const pkMatch = trimmed.match(/[?&]pk=([0-9a-fA-F]{64})/);
     const peerMatch = trimmed.match(/[?&]peer=([^&#\s]+)/);
-    if (pkMatch) {
+    const wanMatch = trimmed.match(/[?&]wan=([^&#\s]+)/);
+    const lanMatch = trimmed.match(/[?&]lan=([^&#\s]+)/);
+
+    let extractedPk = pkMatch ? pkMatch[1].toLowerCase() : null;
+    let peerEp = peerMatch ? peerMatch[1] : null;
+    let wanEp = wanMatch ? wanMatch[1] : null;
+    let lanEp = lanMatch ? lanMatch[1] : null;
+
+    if (!extractedPk && trimmed.startsWith('wex://')) {
+      const hex64Match = trimmed.match(/\b([0-9a-fA-F]{64})\b/);
+      if (hex64Match) {
+        extractedPk = hex64Match[1].toLowerCase();
+      }
+    }
+
+    if (extractedPk || peerEp || wanEp || lanEp) {
       return {
         raw: trimmed,
-        pk: pkMatch[1].toLowerCase(),
-        ipPort: peerMatch ? peerMatch[1] : null
+        pk: extractedPk,
+        ipPort: peerEp || wanEp || lanEp,
+        wan: wanEp,
+        lan: lanEp
       };
     }
 
-    // Also detect any embedded 64-char hex key inside a scanned string
-    const hex64Match = trimmed.match(/\b([0-9a-fA-F]{64})\b/);
-    if (hex64Match && trimmed.startsWith('wex://')) {
-      return {
-        raw: trimmed,
-        pk: hex64Match[1].toLowerCase(),
-        ipPort: peerMatch ? peerMatch[1] : null
-      };
-    }
-
-    return { raw: trimmed, pk: null, ipPort: trimmed };
+    return { raw: trimmed, pk: null, ipPort: trimmed, wan: null, lan: null };
   }
 
   /* ======================== MASTER-DETAIL & TAB NAVIGATION ======================== */
@@ -487,14 +498,22 @@
 
   function normalizeQrPayload(rawKeyOrUri) {
     const clean = (rawKeyOrUri || '').trim();
+    if (!clean) return 'wex://?pk=' + '0'.repeat(64);
     if (isValidHex64(clean)) {
       return 'wex://?pk=' + clean.toLowerCase();
     }
+    if (clean.startsWith('wex://')) {
+      return clean;
+    }
     const parsed = parseTargetInput(clean);
     if (parsed.pk) {
-      return 'wex://?pk=' + parsed.pk.toLowerCase();
+      let uri = 'wex://?pk=' + parsed.pk.toLowerCase();
+      if (parsed.wan) uri += '&wan=' + encodeURIComponent(parsed.wan);
+      if (parsed.lan) uri += '&lan=' + encodeURIComponent(parsed.lan);
+      if (parsed.ipPort && !parsed.wan) uri += '&peer=' + encodeURIComponent(parsed.ipPort);
+      return uri;
     }
-    return clean || ('wex://?pk=' + '0'.repeat(64));
+    return clean;
   }
 
   function renderKeyMatrixCanvas(canvasOrId, hexKey) {
@@ -506,7 +525,7 @@
       return;
     }
 
-    const payload = normalizeQrPayload(hexKey || myPublicKey || '0'.repeat(64));
+    const payload = normalizeQrPayload(hexKey || myInviteUri || myPublicKey || '0'.repeat(64));
 
     let qr;
     try {
@@ -891,7 +910,14 @@
   }
 
   function shareInviteNative(customText) {
-    const link = customText || myInviteUri || (myPublicKey ? `wex://join/${currentSpaceId || 'dm'}?peer=${myWanEndpoint || ('127.0.0.1:' + myUdpPort)}&pk=${myPublicKey}` : '');
+    let link = customText || myInviteUri;
+    if (!link && myPublicKey) {
+      const sp = currentSpaceId || '0000000000000000000000000000000000000000000000000000000000000000';
+      const best = myWanEndpoint || myLanEndpoint || ('127.0.0.1:' + myUdpPort);
+      const wan = myWanEndpoint || best;
+      const lan = myLanEndpoint || ('127.0.0.1:' + myUdpPort);
+      link = `wex://join/${sp}?peer=${best}&wan=${wan}&lan=${lan}&pk=${myPublicKey}&name=WexSpace`;
+    }
     if (!link) return;
     if (window.AndroidBridge && typeof window.AndroidBridge.shareText === 'function') {
       window.AndroidBridge.shareText(link);
@@ -1052,7 +1078,7 @@
     const isOnline = Boolean(ws && ws.readyState === WebSocket.OPEN);
     setText(['net-daemon-state'], isOnline ? 'Подключено' : 'Подключение...');
     setText(['net-udp-port'], isOnline ? 'Активно' : 'Ожидание');
-    setText(['net-wan-endpoint'], myWanEndpoint ? 'Прямое соединение' : 'Автоматический маршрут');
+    setText(['net-wan-endpoint'], myWanEndpoint ? `WAN: ${myWanEndpoint}` : (myLanEndpoint ? `LAN: ${myLanEndpoint}` : 'Автоматический маршрут'));
     setText(['net-dht-count'], String(myDhtCount));
     setText(['net-quas-count'], myOfflineShards > 0 ? `${myOfflineShards} в очереди` : 'Все доставлены');
 
@@ -1063,6 +1089,8 @@
 
     const diagLines = [
       `Состояние: ${isOnline ? 'В сети • На связи' : 'Подключение...'}`,
+      `Локальный адрес (LAN): ${myLanEndpoint || '127.0.0.1:' + myUdpPort}`,
+      `Внешний адрес (WAN/STUN): ${myWanEndpoint || 'Определяется...'}`,
       `Друзей онлайн: ${peersCache.length}`,
       `Узлов в общей сети: ${myDhtCount}`,
       `Ожидают доставки: ${myOfflineShards}`
@@ -1082,16 +1110,25 @@
       : (peersCache.length > 0 ? `В сети • Друзей онлайн: ${peersCache.length}` : 'В сети • На связи');
     setText(['my-node-status'], friendlyStatus);
 
-    const inviteUri = myInviteUri || (myPublicKey ? `wex://join/${currentSpaceId}?peer=127.0.0.1:${myUdpPort}&pk=${myPublicKey}` : 'Загрузка...');
+    let inviteUri = myInviteUri;
+    if (!inviteUri && myPublicKey) {
+      const sp = currentSpaceId || '0000000000000000000000000000000000000000000000000000000000000000';
+      const best = myWanEndpoint || myLanEndpoint || ('127.0.0.1:' + myUdpPort);
+      const wan = myWanEndpoint || best;
+      const lan = myLanEndpoint || ('127.0.0.1:' + myUdpPort);
+      inviteUri = `wex://join/${sp}?peer=${best}&wan=${wan}&lan=${lan}&pk=${myPublicKey}&key=0000000000000000000000000000000000000000000000000000000000000000&name=WexSpace`;
+    }
     setText(['key-pubkey-display', 'invite-pk-box', 'identity-pk-box'], myPublicKey || 'Загрузка...');
-    setText(['invite-link-box', 'identity-invite-box'], inviteUri);
+    setText(['invite-link-box', 'identity-invite-box'], inviteUri || 'Загрузка...');
 
     const nickInput = getEl('profile-nick-input');
     if (nickInput && document.activeElement !== nickInput) {
       nickInput.value = myNick;
     }
 
-    if (myPublicKey) {
+    if (inviteUri) {
+      renderAllKeyCanvases(inviteUri);
+    } else if (myPublicKey) {
       renderAllKeyCanvases(myPublicKey);
     }
   }
@@ -1858,7 +1895,8 @@
         myInviteUri = data.identity.invite_uri || '';
         myDhtCount = data.identity.dht_contacts || 0;
         myOfflineShards = data.identity.offline_shards || 0;
-        myWanEndpoint = data.identity.external_endpoint || '';
+        myWanEndpoint = data.identity.wan_endpoint || data.identity.external_endpoint || '';
+        myLanEndpoint = data.identity.lan_endpoint || '';
       }
 
       if (Array.isArray(data.spaces)) {
@@ -1900,11 +1938,27 @@
         const vBtn = getEl('voice-btn');
         const vBadge = getEl('voice-badge');
         if (vBar) {
-          vBar.classList.toggle('active', voiceConnected);
-          vBar.style.display = voiceConnected ? 'flex' : 'none';
+          if (voiceConnected) {
+            vBar.classList.add('active');
+            vBar.style.display = 'flex';
+          } else {
+            vBar.classList.remove('active');
+            vBar.style.display = 'none';
+          }
         }
         if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
         if (vBadge) vBadge.textContent = voiceConnected ? 'На связи' : 'Войти';
+      } else {
+        voiceConnected = false;
+        const vBar = getEl('voice-bar');
+        const vBtn = getEl('voice-btn');
+        const vBadge = getEl('voice-badge');
+        if (vBar) {
+          vBar.classList.remove('active');
+          vBar.style.display = 'none';
+        }
+        if (vBtn) vBtn.classList.remove('connected');
+        if (vBadge) vBadge.textContent = 'Войти';
       }
       return;
     }
@@ -2001,8 +2055,13 @@
       const vBtn = getEl('voice-btn');
       const vBadge = getEl('voice-badge');
       if (vBar) {
-        vBar.classList.toggle('active', voiceConnected);
-        vBar.style.display = voiceConnected ? 'flex' : 'none';
+        if (voiceConnected) {
+          vBar.classList.add('active');
+          vBar.style.display = 'flex';
+        } else {
+          vBar.classList.remove('active');
+          vBar.style.display = 'none';
+        }
       }
       if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
       if (vBadge) vBadge.textContent = voiceConnected ? 'На связи' : 'Войти';

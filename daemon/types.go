@@ -53,6 +53,8 @@ type IdentityInfo struct {
 	DHTContacts      int    `json:"dht_contacts"`
 	OfflineShards    int    `json:"offline_shards"`
 	ExternalEndpoint string `json:"external_endpoint"`
+	WANEndpoint      string `json:"wan_endpoint"`
+	LANEndpoint      string `json:"lan_endpoint"`
 	InviteURI        string `json:"invite_uri"`
 }
 

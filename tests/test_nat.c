@@ -289,6 +289,106 @@ static void test_symmetric_nat_relay_fallback(void) {
     TEST_PASS("Automated Symmetric NAT Relay Fallback (timeout -> seamless multi-hop relay)");
 }
 
+static void test_multi_endpoint_invite_and_spraying(void) {
+    wex_identity_t id_host, id_client;
+    assert(wex_identity_init(&id_host, NULL, "HostNode") == 0);
+    assert(wex_identity_init(&id_client, NULL, "ClientNode") == 0);
+
+    wex_p2p_node_t host, client;
+    assert(wex_p2p_init(&host, &id_host, 31201) == 0);
+    assert(wex_p2p_init(&client, &id_client, 31202) == 0);
+
+    /* Simulate resolved external WAN endpoint via STUN on host */
+    host.has_external_addr = true;
+    host.external_addr.sin_family = AF_INET;
+    host.external_addr.sin_port = htons(55555);
+    inet_pton(AF_INET, "198.51.100.42", &host.external_addr.sin_addr);
+
+    char invite_uri[512];
+    assert(wex_p2p_create_invite(&host, invite_uri, sizeof(invite_uri)) == 0);
+
+    /* Ensure invite includes both wan and lan endpoints */
+    assert(strstr(invite_uri, "wan=198.51.100.42:55555") != NULL);
+    assert(strstr(invite_uri, "lan=") != NULL);
+    assert(strstr(invite_uri, ":31201") != NULL);
+
+    /* Test client joining multi-endpoint invite URI */
+    /* Note: WAN 198.51.100.42:55555 is not reachable, but LAN 127.0.0.1:31201 succeeds simultaneously */
+    char test_uri[512];
+    snprintf(test_uri, sizeof(test_uri),
+             "wex://join/0000000000000000000000000000000000000000000000000000000000000000?wan=198.51.100.42:55555&lan=127.0.0.1:31201&pk=");
+    char pk_hex[65];
+    wex_id_to_hex(id_host.sign_pk, pk_hex);
+    strcat(test_uri, pk_hex);
+
+    assert(wex_p2p_join_invite(&client, test_uri) == 0);
+
+    for (int t = 0; t < 15; t++) {
+        wex_p2p_poll(&host, 5);
+        wex_p2p_poll(&client, 5);
+        usleep(3000);
+    }
+
+    /* Client and host should establish session via LAN endpoint despite WAN endpoint presence */
+    assert(client.peer_count >= 1);
+    assert(memcmp(client.peers[0].pk, id_host.sign_pk, 32) == 0);
+
+    /* Test direct URI format wex://<node_id>?wan=<ip>:<port>&lan=<ip>:<port> */
+    wex_identity_t id_direct;
+    assert(wex_identity_init(&id_direct, NULL, "DirectNode") == 0);
+    wex_p2p_node_t direct_node;
+    assert(wex_p2p_init(&direct_node, &id_direct, 31203) == 0);
+
+    char direct_uri[256];
+    char direct_pk_hex[65];
+    wex_id_to_hex(id_direct.sign_pk, direct_pk_hex);
+    snprintf(direct_uri, sizeof(direct_uri), "wex://%s?wan=203.0.113.1:54321&lan=127.0.0.1:31203", direct_pk_hex);
+
+    assert(wex_p2p_join_invite(&client, direct_uri) == 0);
+
+    for (int t = 0; t < 15; t++) {
+        wex_p2p_poll(&direct_node, 5);
+        wex_p2p_poll(&client, 5);
+        usleep(3000);
+    }
+
+    bool direct_found = false;
+    for (size_t i = 0; i < client.peer_count; i++) {
+        if (memcmp(client.peers[i].pk, id_direct.sign_pk, 32) == 0) {
+            direct_found = true;
+            break;
+        }
+    }
+    assert(direct_found == true);
+
+    /* Verify continuous UDP hole-punch spraying tracker */
+    struct sockaddr_in target_ep;
+    memset(&target_ep, 0, sizeof(target_ep));
+    target_ep.sin_family = AF_INET;
+    target_ep.sin_port = htons(31201);
+    inet_pton(AF_INET, "127.0.0.1", &target_ep.sin_addr);
+
+    wex_p2p_punch_hole(&client, &target_ep, id_host.sign_pk);
+    assert(client.punch_tracker_count >= 1);
+    size_t trk_idx = client.punch_tracker_count - 1;
+    client.punch_trackers[trk_idx].target_addr = target_ep;
+    client.punch_trackers[trk_idx].has_target_addr = true;
+    client.punch_trackers[trk_idx].direct_success = false;
+    client.punch_trackers[trk_idx].relay_fallback = false;
+
+    uint64_t t0 = client.punch_trackers[trk_idx].punch_started_ms;
+    wex_p2p_maintain(&client, t0 + 200);
+    assert(client.punch_trackers[trk_idx].last_spray_ms == t0 + 200);
+    wex_p2p_maintain(&client, t0 + 400);
+    assert(client.punch_trackers[trk_idx].last_spray_ms == t0 + 400);
+
+    TEST_PASS("Multi-endpoint URI (wan + lan) generation, dual connection, and continuous UDP spraying");
+
+    wex_p2p_close(&host);
+    wex_p2p_close(&client);
+    wex_p2p_close(&direct_node);
+}
+
 int main(void) {
     printf("====================================================\n");
     printf("  Running Wex NAT Traversal & STUN Tests            \n");
@@ -299,6 +399,7 @@ int main(void) {
     test_live_stun_if_available();
     test_coordinated_nat_hole_punch();
     test_symmetric_nat_relay_fallback();
+    test_multi_endpoint_invite_and_spraying();
 
     printf("====================================================\n");
     printf("  ALL NAT & STUN TESTS PASSED SUCCESSFULLY!         \n");

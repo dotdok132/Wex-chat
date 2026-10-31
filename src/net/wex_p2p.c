@@ -478,33 +478,7 @@ int wex_p2p_connect(wex_p2p_node_t *node, const char *host_or_ip, int port) {
 }
 
 static void detect_local_lan_ip(char *out_ip, size_t max_len) {
-    if (!out_ip || max_len == 0) return;
-    strncpy(out_ip, "127.0.0.1", max_len - 1);
-    out_ip[max_len - 1] = '\0';
-
-    int s = socket(AF_INET, SOCK_DGRAM, 0);
-    if (s < 0) return;
-
-    struct sockaddr_in remote;
-    memset(&remote, 0, sizeof(remote));
-    remote.sin_family = AF_INET;
-    remote.sin_port = htons(53);
-    inet_pton(AF_INET, "8.8.8.8", &remote.sin_addr);
-
-    if (connect(s, (struct sockaddr *)&remote, sizeof(remote)) == 0) {
-        struct sockaddr_in local;
-        socklen_t len = sizeof(local);
-        if (getsockname(s, (struct sockaddr *)&local, &len) == 0) {
-            char buf[INET_ADDRSTRLEN];
-            if (inet_ntop(AF_INET, &local.sin_addr, buf, sizeof(buf)) != NULL) {
-                if (strcmp(buf, "0.0.0.0") != 0) {
-                    strncpy(out_ip, buf, max_len - 1);
-                    out_ip[max_len - 1] = '\0';
-                }
-            }
-        }
-    }
-    close(s);
+    wex_detect_local_lan_ip(out_ip, max_len);
 }
 
 int wex_p2p_send_lan_beacon(wex_p2p_node_t *node) {
@@ -623,21 +597,27 @@ int wex_p2p_create_invite(const wex_p2p_node_t *node, char *out_uri, size_t max_
         }
     }
 
-    char endpoint_str[64];
-    if (node->has_external_addr) {
+    char lan_str[64];
+    char lan_ip[INET_ADDRSTRLEN];
+    detect_local_lan_ip(lan_ip, sizeof(lan_ip));
+    snprintf(lan_str, sizeof(lan_str), "%s:%d", lan_ip, node->port);
+
+    char wan_str[64];
+    if (node->has_external_addr && node->external_addr.sin_port != 0) {
         char ext_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &node->external_addr.sin_addr, ext_ip, sizeof(ext_ip));
-        snprintf(endpoint_str, sizeof(endpoint_str), "%s:%d",
+        snprintf(wan_str, sizeof(wan_str), "%s:%d",
                  ext_ip, (int)ntohs(node->external_addr.sin_port));
     } else {
-        char lan_ip[INET_ADDRSTRLEN];
-        detect_local_lan_ip(lan_ip, sizeof(lan_ip));
-        snprintf(endpoint_str, sizeof(endpoint_str), "%s:%d", lan_ip, node->port);
+        strncpy(wan_str, lan_str, sizeof(wan_str) - 1);
+        wan_str[sizeof(wan_str) - 1] = '\0';
     }
 
+    const char *best_peer = (node->has_external_addr && node->external_addr.sin_port != 0) ? wan_str : lan_str;
+
     int written = snprintf(out_uri, max_len,
-                           "wex://join/%s?peer=%s&pk=%s&key=%s&name=%s",
-                           space_hex, endpoint_str, pk_hex, key_hex, space_name);
+                           "wex://join/%s?peer=%s&wan=%s&lan=%s&pk=%s&key=%s&name=%s",
+                           space_hex, best_peer, wan_str, lan_str, pk_hex, key_hex, space_name);
     return (written > 0 && (size_t)written < max_len) ? 0 : -1;
 }
 
@@ -675,6 +655,8 @@ int wex_p2p_join_invite(wex_p2p_node_t *node, const char *invite_or_target) {
                              memcmp(parsed_space_id, zero_id, 32) != 0);
 
         char peer_addr_str[128] = {0};
+        char wan_addr_str[128] = {0};
+        char lan_addr_str[128] = {0};
         uint8_t peer_pk[32];
         bool has_peer_pk = false;
         uint8_t space_key[32];
@@ -687,6 +669,10 @@ int wex_p2p_join_invite(wex_p2p_node_t *node, const char *invite_or_target) {
             while (param) {
                 if (strncmp(param, "peer=", 5) == 0) {
                     strncpy(peer_addr_str, param + 5, sizeof(peer_addr_str) - 1);
+                } else if (strncmp(param, "wan=", 4) == 0) {
+                    strncpy(wan_addr_str, param + 4, sizeof(wan_addr_str) - 1);
+                } else if (strncmp(param, "lan=", 4) == 0) {
+                    strncpy(lan_addr_str, param + 4, sizeof(lan_addr_str) - 1);
                 } else if (strncmp(param, "pk=", 3) == 0 && strlen(param + 3) == 64) {
                     if (wex_hex_to_id(param + 3, peer_pk) == 0) has_peer_pk = true;
                 } else if (strncmp(param, "key=", 4) == 0 && strlen(param + 4) == 64) {
@@ -698,6 +684,13 @@ int wex_p2p_join_invite(wex_p2p_node_t *node, const char *invite_or_target) {
                     }
                 }
                 param = strtok_r(NULL, "&", &saveptr);
+            }
+        }
+
+        /* If path itself is a 64-hex public key (e.g. wex://<node_id>?wan=...&lan=...) */
+        if (!has_peer_pk && strlen(path) == 64) {
+            if (wex_hex_to_id(path, peer_pk) == 0) {
+                has_peer_pk = true;
             }
         }
 
@@ -717,6 +710,29 @@ int wex_p2p_join_invite(wex_p2p_node_t *node, const char *invite_or_target) {
         }
 
         int rc = -1;
+        /* Connect to WAN endpoint */
+        if (wan_addr_str[0] != '\0') {
+            char *colon = strchr(wan_addr_str, ':');
+            if (colon) {
+                *colon = '\0';
+                int port = atoi(colon + 1);
+                if (wex_p2p_connect(node, wan_addr_str, port) == 0) {
+                    rc = 0;
+                }
+            }
+        }
+        /* Connect to LAN endpoint simultaneously */
+        if (lan_addr_str[0] != '\0') {
+            char *colon = strchr(lan_addr_str, ':');
+            if (colon) {
+                *colon = '\0';
+                int port = atoi(colon + 1);
+                if (wex_p2p_connect(node, lan_addr_str, port) == 0) {
+                    rc = 0;
+                }
+            }
+        }
+        /* Connect to legacy peer endpoint if provided */
         if (peer_addr_str[0] != '\0') {
             char *colon = strchr(peer_addr_str, ':');
             if (colon) {
@@ -991,13 +1007,15 @@ int wex_p2p_send_find_node(wex_p2p_node_t *node, const struct sockaddr_in *targe
 int wex_p2p_punch_hole(wex_p2p_node_t *node, const struct sockaddr_in *rendezvous_addr, const uint8_t target_pk[32]) {
     if (!node || node->udp_fd < 0 || !rendezvous_addr || !target_pk) return -1;
 
-    /* Track hole punch attempt for automated Symmetric NAT Relay Fallback */
+    /* Track hole punch attempt for continuous UDP spraying & automated Relay Fallback */
     bool recorded = false;
     uint64_t now_ms = get_time_ms();
     for (size_t i = 0; i < node->punch_tracker_count; i++) {
         if (node->punch_trackers[i].active && memcmp(node->punch_trackers[i].target_pk, target_pk, 32) == 0) {
             node->punch_trackers[i].punch_started_ms = now_ms;
+            node->punch_trackers[i].last_spray_ms = now_ms;
             node->punch_trackers[i].rendezvous_addr = *rendezvous_addr;
+            node->punch_trackers[i].has_target_addr = false;
             node->punch_trackers[i].direct_success = false;
             node->punch_trackers[i].relay_fallback = false;
             recorded = true;
@@ -1008,7 +1026,10 @@ int wex_p2p_punch_hole(wex_p2p_node_t *node, const struct sockaddr_in *rendezvou
         wex_punch_tracker_t *t = &node->punch_trackers[node->punch_tracker_count++];
         memcpy(t->target_pk, target_pk, 32);
         t->punch_started_ms = now_ms;
+        t->last_spray_ms = now_ms;
         t->rendezvous_addr = *rendezvous_addr;
+        memset(&t->target_addr, 0, sizeof(t->target_addr));
+        t->has_target_addr = false;
         t->active = true;
         t->direct_success = false;
         t->relay_fallback = false;
@@ -1095,7 +1116,7 @@ int wex_p2p_find_space_peers(wex_p2p_node_t *node, const uint8_t space_id[32]) {
 
 void wex_p2p_maintain(wex_p2p_node_t *node, uint64_t now_ms) {
     if (!node || node->udp_fd < 0) return;
-    if (now_ms - node->last_maintenance_ms < 1000) return;
+    if (now_ms - node->last_maintenance_ms < 100) return;
     node->last_maintenance_ms = now_ms;
 
     /* Ping active peers periodically to keep NAT mappings open & reconnect LAN->WAN peers */
@@ -1144,7 +1165,14 @@ void wex_p2p_maintain(wex_p2p_node_t *node, uint64_t now_ms) {
     }
     node->lookup_count = active_idx;
 
-    /* Check Symmetric NAT punch timeouts & activate automated Relay Fallback */
+    /* Periodic STUN auto-discovery & WAN endpoint refresh (every 60s, or every 5s until first resolved) */
+    if ((!node->has_external_addr && (now_ms - node->last_stun_refresh_ms >= 5000ULL)) ||
+        (now_ms - node->last_stun_refresh_ms >= 60000ULL)) {
+        node->last_stun_refresh_ms = now_ms;
+        wex_nat_send_probes(node->udp_fd);
+    }
+
+    /* Check Symmetric NAT punch timeouts & continuous UDP hole punch spraying */
     for (size_t i = 0; i < node->punch_tracker_count; i++) {
         wex_punch_tracker_t *pt = &node->punch_trackers[i];
         if (pt->active && !pt->direct_success && !pt->relay_fallback) {
@@ -1172,6 +1200,48 @@ void wex_p2p_maintain(wex_p2p_node_t *node, uint64_t now_ms) {
                     if (node->peer_cb) {
                         node->peer_cb(p, true, node->user_data);
                     }
+                }
+            } else if (now_ms - pt->last_spray_ms >= 150) {
+                pt->last_spray_ms = now_ms;
+                if (pt->has_target_addr) {
+                    /* Continuous UDP hole-punch spraying to target endpoint */
+                    uint8_t punch_pkt[sizeof(wex_pkt_hdr_t)];
+                    wex_pkt_hdr_t *p_hdr = (wex_pkt_hdr_t *)punch_pkt;
+                    p_hdr->magic = htonl(WEX_P2P_MAGIC);
+                    p_hdr->type = WEX_PKT_NAT_PUNCH;
+                    memcpy(p_hdr->sender_pk, node->identity->sign_pk, 32);
+                    memcpy(p_hdr->space_id, node->active_space_id, 32);
+                    p_hdr->payload_len = 0;
+                    sendto(node->udp_fd, punch_pkt, sizeof(punch_pkt), 0,
+                           (struct sockaddr *)&pt->target_addr, sizeof(pt->target_addr));
+
+                    uint8_t hello_buf[sizeof(wex_pkt_hdr_t) + sizeof(wex_pkt_hello_t) + 7];
+                    wex_pkt_hdr_t *h_hdr = (wex_pkt_hdr_t *)hello_buf;
+                    h_hdr->magic = htonl(WEX_P2P_MAGIC);
+                    h_hdr->type = WEX_PKT_HELLO;
+                    memcpy(h_hdr->sender_pk, node->identity->sign_pk, 32);
+                    memcpy(h_hdr->space_id, node->active_space_id, 32);
+                    wex_pkt_hello_t hp;
+                    memset(&hp, 0, sizeof(hp));
+                    memcpy(hp.x25519_pk, node->identity->x25519_pk, 32);
+                    strncpy(hp.nickname, node->identity->nickname, sizeof(hp.nickname) - 1);
+                    h_hdr->payload_len = htons((uint16_t)(sizeof(hp) + 7));
+                    memcpy(hello_buf + sizeof(wex_pkt_hdr_t), &hp, sizeof(hp));
+                    pack_wan_trailer(node, hello_buf + sizeof(wex_pkt_hdr_t) + sizeof(hp));
+                    sendto(node->udp_fd, hello_buf, sizeof(hello_buf), 0,
+                           (struct sockaddr *)&pt->target_addr, sizeof(pt->target_addr));
+                } else if (pt->rendezvous_addr.sin_port != 0) {
+                    /* Retransmit punch coordination request to rendezvous */
+                    uint8_t req_buf[sizeof(wex_pkt_hdr_t) + 32];
+                    wex_pkt_hdr_t *rhdr = (wex_pkt_hdr_t *)req_buf;
+                    rhdr->magic = htonl(WEX_P2P_MAGIC);
+                    rhdr->type = WEX_PKT_NAT_PUNCH_REQ;
+                    memcpy(rhdr->sender_pk, node->identity->sign_pk, 32);
+                    memcpy(rhdr->space_id, node->active_space_id, 32);
+                    rhdr->payload_len = htons(32);
+                    memcpy(req_buf + sizeof(wex_pkt_hdr_t), pt->target_pk, 32);
+                    sendto(node->udp_fd, req_buf, sizeof(req_buf), 0,
+                           (struct sockaddr *)&pt->rendezvous_addr, sizeof(pt->rendezvous_addr));
                 }
             }
         }
@@ -1510,6 +1580,14 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
     /* Check magic */
     uint32_t magic = ntohl(*(uint32_t *)buffer);
     if (magic != WEX_P2P_MAGIC) {
+        /* Check if incoming packet is a STUN RFC 5389 Binding Response */
+        struct sockaddr_in stun_reflexive;
+        if (wex_stun_parse_response(buffer, (size_t)n, &stun_reflexive) == 0) {
+            node->external_addr = stun_reflexive;
+            node->has_external_addr = true;
+            node->last_stun_refresh_ms = get_time_ms();
+            return 1;
+        }
         return 0;
     }
 
@@ -1827,6 +1905,28 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
             struct sockaddr_in remote_addr;
             memcpy(&remote_addr, payload + 32, sizeof(struct sockaddr_in));
 
+            /* Track punch target for continuous spraying */
+            bool trk_found = false;
+            for (size_t i = 0; i < node->punch_tracker_count; i++) {
+                if (node->punch_trackers[i].active && memcmp(node->punch_trackers[i].target_pk, remote_pk, 32) == 0) {
+                    node->punch_trackers[i].target_addr = remote_addr;
+                    node->punch_trackers[i].has_target_addr = true;
+                    trk_found = true;
+                    break;
+                }
+            }
+            if (!trk_found && node->punch_tracker_count < WEX_MAX_PUNCH_TRACK) {
+                wex_punch_tracker_t *t = &node->punch_trackers[node->punch_tracker_count++];
+                memcpy(t->target_pk, remote_pk, 32);
+                t->punch_started_ms = get_time_ms();
+                t->last_spray_ms = get_time_ms();
+                t->target_addr = remote_addr;
+                t->has_target_addr = true;
+                t->active = true;
+                t->direct_success = false;
+                t->relay_fallback = false;
+            }
+
             /* Send direct UDP punch probes */
             uint8_t punch_pkt[sizeof(wex_pkt_hdr_t)];
             wex_pkt_hdr_t *p_hdr = (wex_pkt_hdr_t *)punch_pkt;
@@ -1843,7 +1943,7 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
 
             /* Send HELLO to finalize connection */
             find_or_add_peer(node, &remote_addr, remote_pk, "Peer", NULL);
-            uint8_t hello_buf[sizeof(wex_pkt_hdr_t) + sizeof(wex_pkt_hello_t)];
+            uint8_t hello_buf[sizeof(wex_pkt_hdr_t) + sizeof(wex_pkt_hello_t) + 7];
             wex_pkt_hdr_t *h_hdr = (wex_pkt_hdr_t *)hello_buf;
             h_hdr->magic = htonl(WEX_P2P_MAGIC);
             h_hdr->type = WEX_PKT_HELLO;
@@ -1853,24 +1953,36 @@ int wex_p2p_poll(wex_p2p_node_t *node, int timeout_ms) {
             memset(&h_payload, 0, sizeof(h_payload));
             memcpy(h_payload.x25519_pk, node->identity->x25519_pk, 32);
             strncpy(h_payload.nickname, node->identity->nickname, sizeof(h_payload.nickname) - 1);
-            h_hdr->payload_len = htons((uint16_t)sizeof(h_payload));
+            h_hdr->payload_len = htons((uint16_t)(sizeof(h_payload) + 7));
             memcpy(hello_buf + sizeof(wex_pkt_hdr_t), &h_payload, sizeof(h_payload));
+            pack_wan_trailer(node, hello_buf + sizeof(wex_pkt_hdr_t) + sizeof(h_payload));
             sendto(node->udp_fd, hello_buf, sizeof(hello_buf), 0,
                    (struct sockaddr *)&remote_addr, sizeof(remote_addr));
             break;
         }
 
         case WEX_PKT_NAT_PUNCH: {
-            uint8_t hello_buf[512];
+            for (size_t pt = 0; pt < node->punch_tracker_count; pt++) {
+                if (node->punch_trackers[pt].active && memcmp(node->punch_trackers[pt].target_pk, hdr->sender_pk, 32) == 0) {
+                    node->punch_trackers[pt].direct_success = true;
+                }
+            }
+            find_or_add_peer(node, &src_addr, hdr->sender_pk, "Peer", NULL);
+
+            uint8_t hello_buf[sizeof(wex_pkt_hdr_t) + sizeof(wex_pkt_hello_t) + 7];
             wex_pkt_hdr_t *h_hdr = (wex_pkt_hdr_t *)hello_buf;
             h_hdr->magic = htonl(WEX_P2P_MAGIC);
             h_hdr->type = WEX_PKT_HELLO;
             memcpy(h_hdr->sender_pk, node->identity->sign_pk, 32);
             memcpy(h_hdr->space_id, node->active_space_id, 32);
-            size_t nlen = strlen(node->identity->nickname) + 1;
-            h_hdr->payload_len = htons((uint16_t)nlen);
-            memcpy(hello_buf + sizeof(wex_pkt_hdr_t), node->identity->nickname, nlen);
-            sendto(node->udp_fd, hello_buf, sizeof(wex_pkt_hdr_t) + nlen, 0,
+            wex_pkt_hello_t h_payload;
+            memset(&h_payload, 0, sizeof(h_payload));
+            memcpy(h_payload.x25519_pk, node->identity->x25519_pk, 32);
+            strncpy(h_payload.nickname, node->identity->nickname, sizeof(h_payload.nickname) - 1);
+            h_hdr->payload_len = htons((uint16_t)(sizeof(h_payload) + 7));
+            memcpy(hello_buf + sizeof(wex_pkt_hdr_t), &h_payload, sizeof(h_payload));
+            pack_wan_trailer(node, hello_buf + sizeof(wex_pkt_hdr_t) + sizeof(h_payload));
+            sendto(node->udp_fd, hello_buf, sizeof(hello_buf), 0,
                    (struct sockaddr *)&src_addr, sizeof(src_addr));
             break;
         }

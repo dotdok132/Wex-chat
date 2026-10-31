@@ -626,6 +626,8 @@ func (s *Server) buildStatus() StatusResponse {
 
 	var peers []PeerInfo
 	var extEndpoint string
+	var wanEndpoint string
+	var lanEndpoint string
 	var udpPort int
 	if s.node != nil {
 		peers = s.node.GetConnectedPeersList()
@@ -633,7 +635,10 @@ func (s *Server) buildStatus() StatusResponse {
 		if len(externalAddrs) > 0 {
 			extEndpoint = externalAddrs[0]
 		}
+		wanEndpoint, lanEndpoint = s.node.GetEndpoints()
 		udpPort = s.node.listenPort
+	} else {
+		lanEndpoint = DetectLocalLANIP(s.httpPort)
 	}
 	if peers == nil {
 		peers = []PeerInfo{}
@@ -643,10 +648,24 @@ func (s *Server) buildStatus() StatusResponse {
 
 	spacePart := activeSpace
 	if spacePart == "" {
-		spacePart = "direct"
+		spacePart = DefaultSpaceHex
 	}
-	inviteURI := fmt.Sprintf("wex://join/%s?peer=%s&pk=%s&name=%s",
-		spacePart, extEndpoint, ident.PubHex, "WexSpace")
+
+	bestPeer := wanEndpoint
+	if bestPeer == "" {
+		bestPeer = lanEndpoint
+	}
+	if bestPeer == "" {
+		bestPeer = extEndpoint
+	}
+
+	wanParam := wanEndpoint
+	if wanParam == "" {
+		wanParam = lanEndpoint
+	}
+
+	inviteURI := fmt.Sprintf("wex://join/%s?peer=%s&wan=%s&lan=%s&pk=%s&key=0000000000000000000000000000000000000000000000000000000000000000&name=%s",
+		spacePart, bestPeer, wanParam, lanEndpoint, ident.PubHex, "WexSpace")
 
 	return StatusResponse{
 		Type: "status",
@@ -660,6 +679,8 @@ func (s *Server) buildStatus() StatusResponse {
 			DHTContacts:      len(peers),
 			OfflineShards:    0,
 			ExternalEndpoint: extEndpoint,
+			WANEndpoint:      wanEndpoint,
+			LANEndpoint:      lanEndpoint,
 			InviteURI:        inviteURI,
 		},
 		Spaces:        spacesCopy,

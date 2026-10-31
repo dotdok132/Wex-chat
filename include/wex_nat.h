@@ -26,6 +26,15 @@ int wex_stun_query(int udp_fd, const char *stun_host, int stun_port,
 /* Try a list of well-known STUN servers to resolve external IP and port */
 int wex_nat_auto_discover(int udp_fd, struct sockaddr_in *out_addr);
 
+/* Send non-blocking STUN binding requests to well-known STUN servers */
+int wex_nat_send_probes(int udp_fd);
+
+/* Parse a received STUN response buffer to extract reflexive sockaddr_in */
+int wex_stun_parse_response(const uint8_t *buf, size_t len, struct sockaddr_in *out_reflexive_addr);
+
+/* Detect primary local network IPv4 address (e.g. "192.168.1.100") */
+void wex_detect_local_lan_ip(char *out_ip, size_t max_len);
+
 /* Format IP and port to string buffer (e.g. "178.54.183.43:44547") */
 void wex_addr_to_string(const struct sockaddr_in *addr, char *out_str, size_t max_len);
 

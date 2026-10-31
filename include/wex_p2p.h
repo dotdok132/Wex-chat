@@ -80,7 +80,10 @@ typedef struct {
 typedef struct {
     uint8_t target_pk[32];
     uint64_t punch_started_ms;
+    uint64_t last_spray_ms;
     struct sockaddr_in rendezvous_addr;
+    struct sockaddr_in target_addr;
+    bool has_target_addr;
     bool active;
     bool direct_success;
     bool relay_fallback;
@@ -122,6 +125,7 @@ typedef struct {
     /* NAT reflexive endpoint */
     struct sockaddr_in external_addr;
     bool has_external_addr;
+    uint64_t last_stun_refresh_ms;
 
     /* Zero-config LAN broadcast discovery */
     bool lan_discovery_enabled;

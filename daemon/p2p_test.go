@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -154,5 +155,52 @@ func TestDirectMessageEndToEnd(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatalf("timed out waiting for DM stream message")
+	}
+}
+
+func TestMultiEndpointSTUNAndInvite(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dir := "/tmp/wex_test_multi_ep"
+	_ = os.RemoveAll(dir)
+	defer os.RemoveAll(dir)
+
+	ident, err := LoadOrCreateIdentity(dir, "MultiEndpointUser")
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+	store, err := NewStorage(dir)
+	if err != nil {
+		t.Fatalf("storage: %v", err)
+	}
+	node, err := NewP2PNode(ctx, ident, store, 0, false, nil)
+	if err != nil {
+		t.Fatalf("node: %v", err)
+	}
+	defer node.Close()
+
+	srv := NewServer(0, "web", dir, ident, store, node)
+	status := srv.buildStatus()
+
+	if status.Identity.LANEndpoint == "" {
+		t.Fatalf("LANEndpoint should not be empty")
+	}
+	if !strings.Contains(status.Identity.InviteURI, "wan=") {
+		t.Fatalf("InviteURI missing wan=: %s", status.Identity.InviteURI)
+	}
+	if !strings.Contains(status.Identity.InviteURI, "lan=") {
+		t.Fatalf("InviteURI missing lan=: %s", status.Identity.InviteURI)
+	}
+	if !strings.Contains(status.Identity.InviteURI, "peer=") {
+		t.Fatalf("InviteURI missing peer=: %s", status.Identity.InviteURI)
+	}
+	if !strings.Contains(status.Identity.InviteURI, "pk=") {
+		t.Fatalf("InviteURI missing pk=: %s", status.Identity.InviteURI)
+	}
+
+	lan := DetectLocalLANIP(9005)
+	if !strings.HasSuffix(lan, ":9005") {
+		t.Fatalf("DetectLocalLANIP unexpected result: %s", lan)
 	}
 }

@@ -87,7 +87,7 @@ void wex_voice_room_init(wex_voice_room_t *room, const char *channel, uint32_t s
     room->next_seq = 1;
     room->timestamp_clock = 0;
     room->participant_count = 0;
-    room->is_in_call = true;
+    room->is_in_call = false;
     wex_jitter_buffer_init(&room->jitter);
 }
 

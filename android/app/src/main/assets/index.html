@@ -4063,11 +4063,27 @@
         const vBtn = getEl('voice-btn');
         const vBadge = getEl('voice-badge');
         if (vBar) {
-          vBar.classList.toggle('active', voiceConnected);
-          vBar.style.display = voiceConnected ? 'flex' : 'none';
+          if (voiceConnected) {
+            vBar.classList.add('active');
+            vBar.style.display = 'flex';
+          } else {
+            vBar.classList.remove('active');
+            vBar.style.display = 'none';
+          }
         }
         if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
         if (vBadge) vBadge.textContent = voiceConnected ? 'На связи' : 'Войти';
+      } else {
+        voiceConnected = false;
+        const vBar = getEl('voice-bar');
+        const vBtn = getEl('voice-btn');
+        const vBadge = getEl('voice-badge');
+        if (vBar) {
+          vBar.classList.remove('active');
+          vBar.style.display = 'none';
+        }
+        if (vBtn) vBtn.classList.remove('connected');
+        if (vBadge) vBadge.textContent = 'Войти';
       }
       return;
     }
@@ -4164,8 +4180,13 @@
       const vBtn = getEl('voice-btn');
       const vBadge = getEl('voice-badge');
       if (vBar) {
-        vBar.classList.toggle('active', voiceConnected);
-        vBar.style.display = voiceConnected ? 'flex' : 'none';
+        if (voiceConnected) {
+          vBar.classList.add('active');
+          vBar.style.display = 'flex';
+        } else {
+          vBar.classList.remove('active');
+          vBar.style.display = 'none';
+        }
       }
       if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
       if (vBadge) vBadge.textContent = voiceConnected ? 'На связи' : 'Войти';

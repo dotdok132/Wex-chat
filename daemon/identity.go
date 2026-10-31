@@ -189,3 +189,11 @@ func VerifySignature(pubKeyHex, sigHex string, msg []byte) bool {
 	}
 	return ed25519.Verify(pub, msg, sig)
 }
+
+func PeerIDFromEd25519Pub(pubBytes []byte) (peer.ID, error) {
+	lpPub, err := libp2pcrypto.UnmarshalEd25519PublicKey(pubBytes)
+	if err != nil {
+		return "", err
+	}
+	return peer.IDFromPublicKey(lpPub)
+}

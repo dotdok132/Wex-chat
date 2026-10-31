@@ -420,6 +420,20 @@ int wex_server_start(wex_server_t *srv) {
     set_nonblocking(srv->ws_server_fd);
     srv->running = true;
 
+    /* Trigger WAN STUN Discovery on startup */
+    struct sockaddr_in ext_addr;
+    if (wex_nat_auto_discover(srv->p2p.udp_fd, &ext_addr) == 0) {
+        char ext_str[64];
+        wex_addr_to_string(&ext_addr, ext_str, sizeof(ext_str));
+        srv->p2p.external_addr = ext_addr;
+        srv->p2p.has_external_addr = true;
+        srv->p2p.last_stun_refresh_ms = (uint64_t)time(NULL) * 1000ULL;
+        printf("[+] External WAN Endpoint via STUN: %s\n", ext_str);
+    } else {
+        /* Send non-blocking STUN probes to resolve asynchronously */
+        wex_nat_send_probes(srv->p2p.udp_fd);
+    }
+
     printf("[+] Wex WebSocket daemon on http://127.0.0.1:%d\n", srv->ws_port);
     printf("[+] Wex P2P UDP engine on 0.0.0.0:%d\n", srv->udp_port);
     return 0;
@@ -446,14 +460,23 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
     cJSON_AddNumberToObject(ident, "udp_port", srv->udp_port);
     cJSON_AddNumberToObject(ident, "dht_contacts", (double)srv->p2p.dht.total_contacts);
     cJSON_AddNumberToObject(ident, "offline_shards", (double)srv->p2p.offline_store.count);
+
+    char lan_ip[INET_ADDRSTRLEN];
+    wex_detect_local_lan_ip(lan_ip, sizeof(lan_ip));
+    char lan_ep[64];
+    snprintf(lan_ep, sizeof(lan_ep), "%s:%d", lan_ip, srv->udp_port);
+    cJSON_AddStringToObject(ident, "lan_endpoint", lan_ep);
+
     if (srv->p2p.has_external_addr) {
         char ext_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &srv->p2p.external_addr.sin_addr, ext_ip, sizeof(ext_ip));
         char ext_ep[64];
         snprintf(ext_ep, sizeof(ext_ep), "%s:%d", ext_ip, (int)ntohs(srv->p2p.external_addr.sin_port));
         cJSON_AddStringToObject(ident, "external_endpoint", ext_ep);
+        cJSON_AddStringToObject(ident, "wan_endpoint", ext_ep);
     } else {
         cJSON_AddStringToObject(ident, "external_endpoint", "");
+        cJSON_AddStringToObject(ident, "wan_endpoint", "");
     }
     char invite_uri[512];
     if (wex_p2p_create_invite(&srv->p2p, invite_uri, sizeof(invite_uri)) == 0) {
@@ -562,7 +585,7 @@ static void send_status_json(wex_server_t *srv, int client_fd) {
 
     cJSON *voice = cJSON_CreateObject();
     cJSON_AddBoolToObject(voice, "connected", srv->voice_room.is_in_call);
-    cJSON_AddStringToObject(voice, "channel", srv->voice_room.channel);
+    cJSON_AddStringToObject(voice, "channel", srv->voice_room.is_in_call ? srv->voice_room.channel : "");
     cJSON_AddItemToObject(root, "voice", voice);
 
     char *json_str = cJSON_PrintUnformatted(root);

@@ -14,8 +14,12 @@ static void test_voice_room_and_framing(void) {
 
     assert(strcmp(room.channel, "lounge") == 0);
     assert(room.my_ssrc == 0xA1B2C3D4);
-    assert(room.is_in_call == true);
+    assert(room.is_in_call == false);
     assert(room.participant_count == 0);
+
+    /* Joining voice call activates in-call status */
+    room.is_in_call = true;
+    assert(room.is_in_call == true);
 
     /* Add participants */
     struct sockaddr_in p1, p2;
@@ -49,9 +53,11 @@ static void test_voice_room_and_framing(void) {
     assert(h2.timestamp == 960); /* 48 kHz standard 20ms audio frame */
     assert(h2.payload_len == 80);
 
-    /* Remove peer */
+    /* Remove peer and leave call */
     wex_voice_room_remove_peer(&room, &p1);
     assert(room.participant_count == 1);
+    room.is_in_call = false;
+    assert(room.is_in_call == false);
 
     TEST_PASS("Voice Room Session, Framing, and Timestamp Clock");
 }

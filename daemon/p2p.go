@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,6 +50,9 @@ type P2PNode struct {
 	knownPeers    map[peer.ID]*PeerInfo
 	activeSpace   string
 	activeChannel string
+
+	wanEndpoint   string
+	lanEndpoint   string
 
 	onMessage     func(msg Message)
 	onPeerEvent   func()
@@ -129,6 +133,7 @@ func NewP2PNode(ctx context.Context, ident *Identity, storage *Storage, port int
 		knownPeers:    make(map[peer.ID]*PeerInfo),
 		activeSpace:   DefaultSpaceHex,
 		activeChannel: "general",
+		lanEndpoint:   DetectLocalLANIP(port),
 	}
 
 	// Stream handler for Direct Messages
@@ -140,6 +145,9 @@ func NewP2PNode(ctx context.Context, ident *Identity, storage *Storage, port int
 	// mDNS local LAN discovery
 	mdnsService := mdns.NewMdnsService(h, "wex-chat", &mdnsNotifee{node: node})
 	_ = mdnsService.Start()
+
+	// Launch background STUN auto-discovery and periodic refresh
+	go node.runStunDiscovery()
 
 	// Connect to bootstrap peers in background
 	go node.bootstrapSwarm(bootstrapPeers)
@@ -519,22 +527,189 @@ func (node *P2PNode) RequestBlob(targetPID peer.ID, hashHex string) ([]byte, err
 	return data, nil
 }
 
+func (node *P2PNode) runStunDiscovery() {
+	node.refreshSTUN()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	resolvedOnce := false
+	for {
+		select {
+		case <-node.ctx.Done():
+			return
+		case <-ticker.C:
+			node.mu.RLock()
+			hasWan := node.wanEndpoint != ""
+			node.mu.RUnlock()
+
+			if !hasWan {
+				node.refreshSTUN()
+			} else {
+				if !resolvedOnce {
+					resolvedOnce = true
+					ticker.Reset(60 * time.Second)
+				}
+				node.refreshSTUN()
+			}
+		}
+	}
+}
+
+func (node *P2PNode) refreshSTUN() {
+	lan := DetectLocalLANIP(node.listenPort)
+
+	ep, err := DiscoverExternalSTUN(3 * time.Second)
+	var wan string
+	if err == nil && ep != "" {
+		host, _, err := net.SplitHostPort(ep)
+		if err == nil {
+			wan = fmt.Sprintf("%s:%d", host, node.listenPort)
+		} else {
+			wan = ep
+		}
+	}
+
+	node.mu.Lock()
+	changed := (node.lanEndpoint != lan) || (wan != "" && node.wanEndpoint != wan)
+	node.lanEndpoint = lan
+	if wan != "" {
+		node.wanEndpoint = wan
+	}
+	onPeer := node.onPeerEvent
+	node.mu.Unlock()
+
+	if changed && onPeer != nil {
+		onPeer()
+	}
+}
+
+func (node *P2PNode) GetEndpoints() (wan, lan string) {
+	node.mu.RLock()
+	defer node.mu.RUnlock()
+	return node.wanEndpoint, node.lanEndpoint
+}
+
 func (node *P2PNode) ConnectPeer(targetStr string) error {
 	targetStr = strings.TrimSpace(targetStr)
 
 	// 1. Full wex:// URI
 	if strings.HasPrefix(targetStr, "wex://") {
-		// Example: wex://join/<space_id>?peer=<multiaddr>&name=...
-		targetStr = strings.TrimPrefix(targetStr, "wex://join/")
-		targetStr = strings.TrimPrefix(targetStr, "wex://peer/")
-		parts := strings.Split(targetStr, "?")
-		if len(parts) > 1 {
-			for _, param := range strings.Split(parts[1], "&") {
+		uriStr := strings.TrimPrefix(targetStr, "wex://")
+		path := uriStr
+		query := ""
+		if qIdx := strings.Index(uriStr, "?"); qIdx != -1 {
+			path = uriStr[:qIdx]
+			query = uriStr[qIdx+1:]
+		}
+		path = strings.TrimPrefix(path, "join/")
+		path = strings.TrimPrefix(path, "peer/")
+
+		var peerAddr, wanAddr, lanAddr, pkHex string
+		if len(path) == 64 {
+			pkHex = path
+		}
+
+		if query != "" {
+			for _, param := range strings.Split(query, "&") {
 				if strings.HasPrefix(param, "peer=") {
-					targetStr = strings.TrimPrefix(param, "peer=")
-					break
+					peerAddr = strings.TrimPrefix(param, "peer=")
+				} else if strings.HasPrefix(param, "wan=") {
+					wanAddr = strings.TrimPrefix(param, "wan=")
+				} else if strings.HasPrefix(param, "lan=") {
+					lanAddr = strings.TrimPrefix(param, "lan=")
+				} else if strings.HasPrefix(param, "pk=") {
+					pkHex = strings.TrimPrefix(param, "pk=")
 				}
 			}
+		}
+
+		var targetPID peer.ID
+		if pkHex != "" {
+			if pubBytes, err := hex.DecodeString(pkHex); err == nil && len(pubBytes) == 32 {
+				if pid, err := PeerIDFromEd25519Pub(pubBytes); err == nil {
+					targetPID = pid
+				}
+			}
+		}
+
+		endpoints := make([]string, 0, 3)
+		if wanAddr != "" {
+			endpoints = append(endpoints, wanAddr)
+		}
+		if lanAddr != "" && lanAddr != wanAddr {
+			endpoints = append(endpoints, lanAddr)
+		}
+		if peerAddr != "" && peerAddr != wanAddr && peerAddr != lanAddr {
+			endpoints = append(endpoints, peerAddr)
+		}
+
+		if len(endpoints) > 0 {
+			var dialWg sync.WaitGroup
+			var connected bool
+			var connMu sync.Mutex
+
+			for _, ep := range endpoints {
+				dialWg.Add(1)
+				go func(endpoint string) {
+					defer dialWg.Done()
+					if strings.HasPrefix(endpoint, "/") {
+						if ma, err := multiaddr.NewMultiaddr(endpoint); err == nil {
+							if info, err := peer.AddrInfoFromP2pAddr(ma); err == nil {
+								ctx, cancel := context.WithTimeout(node.ctx, 8*time.Second)
+								defer cancel()
+								if err := node.host.Connect(ctx, *info); err == nil {
+									connMu.Lock()
+									connected = true
+									connMu.Unlock()
+								}
+							}
+						}
+						return
+					}
+
+					if host, port, err := net.SplitHostPort(endpoint); err == nil {
+						addrs := make([]multiaddr.Multiaddr, 0, 2)
+						if tcpMa, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%s", host, port)); err == nil {
+							addrs = append(addrs, tcpMa)
+						}
+						if quicMa, err := multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/udp/%s/quic-v1", host, port)); err == nil {
+							addrs = append(addrs, quicMa)
+						}
+
+						if targetPID != "" && len(addrs) > 0 {
+							info := peer.AddrInfo{
+								ID:    targetPID,
+								Addrs: addrs,
+							}
+							ctx, cancel := context.WithTimeout(node.ctx, 8*time.Second)
+							defer cancel()
+							if err := node.host.Connect(ctx, info); err == nil {
+								connMu.Lock()
+								connected = true
+								connMu.Unlock()
+							}
+						}
+					}
+				}(ep)
+			}
+
+			dialWg.Wait()
+			if connected {
+				return nil
+			}
+		}
+
+		if targetPID != "" && node.dht != nil {
+			ctx, cancel := context.WithTimeout(node.ctx, 10*time.Second)
+			defer cancel()
+			if info, err := node.dht.FindPeer(ctx, targetPID); err == nil {
+				return node.host.Connect(ctx, info)
+			}
+		}
+
+		if len(endpoints) > 0 {
+			targetStr = endpoints[0]
 		}
 	}
 
