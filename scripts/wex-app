@@ -12,7 +12,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-DAEMON_BIN="${PROJECT_ROOT}/build/wex_daemon"
+if [[ -f "${PROJECT_ROOT}/daemon/wex-daemon" || -d "${PROJECT_ROOT}/daemon" ]]; then
+    DAEMON_BIN="${PROJECT_ROOT}/daemon/wex-daemon"
+else
+    DAEMON_BIN="${PROJECT_ROOT}/build/wex_daemon"
+fi
 
 HOST="127.0.0.1"
 PORT="${WEX_WS_PORT:-9000}"
@@ -57,17 +61,22 @@ cd "${PROJECT_ROOT}"
 
 # Build daemon automatically if binary does not exist
 if [[ ! -x "${DAEMON_BIN}" ]]; then
-    echo "[wex-app] Daemon binary not found at ${DAEMON_BIN}, building..."
-    cmake -B "${PROJECT_ROOT}/build" "${PROJECT_ROOT}"
-    cmake --build "${PROJECT_ROOT}/build" --target wex_daemon
+    if [[ "${DAEMON_BIN}" == *"/daemon/wex-daemon" ]]; then
+        echo "[wex-app] libp2p daemon binary not found, compiling Go daemon..."
+        (cd "${PROJECT_ROOT}/daemon" && go build -o wex-daemon .)
+    else
+        echo "[wex-app] C daemon binary not found at ${DAEMON_BIN}, building with CMake..."
+        cmake -B "${PROJECT_ROOT}/build" "${PROJECT_ROOT}"
+        cmake --build "${PROJECT_ROOT}/build" --target wex_daemon
+    fi
 fi
 
-# 1. Start ./build/wex_daemon in the background if not already listening on port 9000
+# 1. Start daemon in the background if not already listening on port 9000
 if is_port_listening; then
     echo "[wex-app] Wex-Chat daemon already listening on ${HOST}:${PORT}"
 else
-    echo "[wex-app] Starting ./build/wex_daemon on ${HOST}:${PORT}..."
-    ./build/wex_daemon --ws "${PORT}" "$@" >/dev/null 2>&1 &
+    echo "[wex-app] Starting ${DAEMON_BIN} on ${HOST}:${PORT}..."
+    "${DAEMON_BIN}" --ws "${PORT}" "$@" >/dev/null 2>&1 &
     DAEMON_PID=$!
     STARTED_DAEMON=1
 
