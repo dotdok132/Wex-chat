@@ -61,6 +61,12 @@ echo "[*] Compiling native C99 Wex P2P Core (libwex.so) for x86_64..."
     $C_SOURCES -llog -o "$BUILD_DIR/lib/x86_64/libwex.so"
 "$STRIP" "$BUILD_DIR/lib/x86_64/libwex.so"
 
+echo "[*] Synchronizing web UI assets (HTML, scripts, styles, QR bundles) into Android assets..."
+mkdir -p "$ROOT_DIR/app/src/main/assets"
+if [ -d "$SRC_ROOT/web" ]; then
+    cp -rf "$SRC_ROOT/web/"* "$ROOT_DIR/app/src/main/assets/"
+fi
+
 echo "[*] Compiling Android resources with AAPT2..."
 "$AAPT2" compile --dir "$ROOT_DIR/app/src/main/res" -o "$BUILD_DIR/compiled_res.zip"
 
@@ -75,7 +81,7 @@ echo "[*] Linking resources and packaging assets..."
     "$BUILD_DIR/compiled_res.zip"
 
 echo "[*] Compiling Java source files..."
-javac -g -source 8 -target 8 \
+javac -g -source 8 -target 8 -Xlint:-options \
     -cp "$PLATFORM" \
     -d "$BUILD_DIR/classes" \
     "$BUILD_DIR/gen/net/wexchat/R.java" \

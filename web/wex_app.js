@@ -17,8 +17,14 @@
   let activeTab = 'dms'; // 'dms' | 'swarms' | 'net' | 'key'
   let activeChatMode = 'dm'; // 'dm' | 'swarm'
   let currentSpaceId = '';
-  let currentChannel = 'general';
+  let currentChannel = '';
   let currentDmPeerPk = null;
+
+  function isWelcomeMode() {
+    if (activeChatMode === 'dm' && !currentDmPeerPk) return true;
+    if (activeChatMode === 'swarm' && (!currentSpaceId || spacesCache.length === 0)) return true;
+    return false;
+  }
 
   /* Local Profile & Connection State */
   let myNick = 'Пользователь';
@@ -399,8 +405,17 @@
   }
 
   function closeActiveChat() {
+    activeChatMode = 'dm';
+    currentDmPeerPk = null;
+    currentSpaceId = '';
+    currentChannel = '';
     document.body.classList.remove('chat-active');
     document.body.classList.remove('drawer-open');
+    updateChatHeader();
+    renderContactList();
+    renderSpacesList();
+    renderChannelsList();
+    renderHistory(historyCache);
   }
 
   function closeMobileConversation() {
@@ -412,6 +427,27 @@
     const titleEl = getEl('active-channel-name', 'chat-header-title');
     const topicEl = getEl('active-channel-topic', 'chat-header-subtitle');
     const inputEl = getEl('msg-input', 'chat-input');
+    const inputWrapper = getEl('chat-input-wrapper');
+    const welcomeHint = getEl('welcome-input-hint');
+    const backBtn = getEl('btn-back-to-list');
+
+    if (isWelcomeMode()) {
+      if (prefixEl) {
+        prefixEl.textContent = '';
+        prefixEl.style.display = 'none';
+      }
+      if (titleEl) titleEl.textContent = 'Wex-Chat';
+      if (topicEl) topicEl.textContent = 'Приватный мессенджер';
+      if (inputWrapper) inputWrapper.style.display = 'none';
+      if (welcomeHint) welcomeHint.style.display = 'flex';
+      if (backBtn) backBtn.style.display = 'none';
+      return;
+    }
+
+    if (prefixEl) prefixEl.style.display = '';
+    if (inputWrapper) inputWrapper.style.display = 'flex';
+    if (welcomeHint) welcomeHint.style.display = 'none';
+    if (backBtn) backBtn.style.display = '';
 
     if (activeChatMode === 'dm' && currentDmPeerPk) {
       const c = contacts[currentDmPeerPk] || {
@@ -424,160 +460,30 @@
       if (titleEl) titleEl.textContent = c.nickname || 'Собеседник';
       if (topicEl) topicEl.textContent = c && c.online ? 'В сети' : 'Личный чат';
       if (inputEl) inputEl.placeholder = 'Написать сообщение...';
-    } else {
+    } else if (activeChatMode === 'swarm' && currentSpaceId) {
       const sp = spacesCache.find((s) => s.id === currentSpaceId);
-      const spName = sp ? sp.name : 'Уютное сообщество';
+      const spName = sp ? sp.name : 'Группа';
       if (prefixEl) prefixEl.textContent = '#';
-      if (titleEl) titleEl.textContent = currentChannel;
+      if (titleEl) titleEl.textContent = currentChannel || 'общий';
       if (topicEl) topicEl.textContent = spName;
       if (inputEl) inputEl.placeholder = 'Написать сообщение...';
+    } else {
+      if (prefixEl) {
+        prefixEl.textContent = '';
+        prefixEl.style.display = 'none';
+      }
+      if (titleEl) titleEl.textContent = 'Wex-Chat';
+      if (topicEl) topicEl.textContent = 'Приватный мессенджер';
+      if (inputWrapper) inputWrapper.style.display = 'none';
+      if (welcomeHint) welcomeHint.style.display = 'flex';
+      if (backBtn) backBtn.style.display = 'none';
     }
   }
 
   /* =========================================================================
-     ISO/IEC 18004 QR CODE GENERATOR (VERSION 4-L, 33x33 MATRIX, REED-SOLOMON)
-     + PURE-JS OPTICAL MATRIX DECODER FOR IN-APP CAMERA & IMAGE SCANNING
+     ISO/IEC 18004 QR CODE GENERATOR (via window.qrcode)
+     + ROBUST JSQR OPTICAL SCANNER (via window.jsQR)
      ========================================================================= */
-  const QR_V4_SIZE = 33;
-  const QR_V4_DATA_CODEWORDS = 80;
-  const QR_V4_EC_CODEWORDS = 20;
-
-  const GF_EXP = new Uint8Array(512);
-  const GF_LOG = new Uint8Array(256);
-  (function initGaloisField() {
-    let x = 1;
-    for (let i = 0; i < 255; i++) {
-      GF_EXP[i] = x;
-      GF_LOG[x] = i;
-      x <<= 1;
-      if (x & 0x100) x ^= 0x11d;
-    }
-    for (let i = 255; i < 512; i++) {
-      GF_EXP[i] = GF_EXP[i - 255];
-    }
-  })();
-
-  function gfMul(a, b) {
-    if (a === 0 || b === 0) return 0;
-    return GF_EXP[GF_LOG[a] + GF_LOG[b]];
-  }
-
-  function computeReedSolomonEc(dataBytes, ecLen) {
-    let gen = [1];
-    for (let i = 0; i < ecLen; i++) {
-      const next = new Array(gen.length + 1).fill(0);
-      const root = GF_EXP[i];
-      for (let j = 0; j < gen.length; j++) {
-        next[j] ^= gen[j];
-        next[j + 1] ^= gfMul(gen[j], root);
-      }
-      gen = next;
-    }
-
-    const msg = new Uint8Array(dataBytes.length + ecLen);
-    msg.set(dataBytes, 0);
-
-    for (let i = 0; i < dataBytes.length; i++) {
-      const coef = msg[i];
-      if (coef !== 0) {
-        for (let j = 0; j < gen.length; j++) {
-          msg[i + j] ^= gfMul(gen[j], coef);
-        }
-      }
-    }
-    return msg.slice(dataBytes.length);
-  }
-
-  function createQrV4FunctionTemplate() {
-    const N = QR_V4_SIZE;
-    const isFunc = Array.from({ length: N }, () => new Uint8Array(N));
-    const mod = Array.from({ length: N }, () => new Uint8Array(N));
-
-    function placeFinder(ox, oy) {
-      for (let r = -1; r <= 7; r++) {
-        for (let c = -1; c <= 7; c++) {
-          const rr = oy + r;
-          const cc = ox + c;
-          if (rr < 0 || rr >= N || cc < 0 || cc >= N) continue;
-          isFunc[rr][cc] = 1;
-          if (r >= 0 && r <= 6 && c >= 0 && c <= 6) {
-            const border = r === 0 || r === 6 || c === 0 || c === 6;
-            const inner = r >= 2 && r <= 4 && c >= 2 && c <= 4;
-            mod[rr][cc] = (border || inner) ? 1 : 0;
-          } else {
-            mod[rr][cc] = 0;
-          }
-        }
-      }
-    }
-
-    placeFinder(0, 0);
-    placeFinder(N - 7, 0);
-    placeFinder(0, N - 7);
-
-    // Alignment pattern at (26, 26) for Version 4
-    const ax = 26;
-    const ay = 26;
-    for (let r = -2; r <= 2; r++) {
-      for (let c = -2; c <= 2; c++) {
-        const rr = ay + r;
-        const cc = ax + c;
-        isFunc[rr][cc] = 1;
-        const dist = Math.max(Math.abs(r), Math.abs(c));
-        mod[rr][cc] = (dist === 2 || dist === 0) ? 1 : 0;
-      }
-    }
-
-    // Timing patterns on row 6 and col 6
-    for (let i = 8; i < N - 8; i++) {
-      isFunc[6][i] = 1;
-      mod[6][i] = (i % 2 === 0) ? 1 : 0;
-      isFunc[i][6] = 1;
-      mod[i][6] = (i % 2 === 0) ? 1 : 0;
-    }
-
-    // Dark module and reserved format information areas
-    isFunc[N - 8][8] = 1;
-    mod[N - 8][8] = 1;
-
-    for (let i = 0; i <= 8; i++) {
-      if (i !== 6) {
-        isFunc[8][i] = 1;
-        isFunc[i][8] = 1;
-      }
-    }
-    for (let i = 0; i < 8; i++) {
-      isFunc[8][N - 1 - i] = 1;
-    }
-    for (let i = 0; i < 7; i++) {
-      isFunc[N - 1 - i][8] = 1;
-    }
-
-    // Write Format Info for Level L (01) and Mask 0 (000) -> BCH(15,5)
-    let fmtData = (0x01 << 3) | 0x00; // 01000
-    let rem = fmtData << 10;
-    for (let i = 14; i >= 10; i--) {
-      if ((rem >>> i) & 1) rem ^= (0x537 << (i - 10));
-    }
-    const fmtBits = ((fmtData << 10) | rem) ^ 0x5412;
-
-    const fmtCoordsA = [
-      [8, 0], [8, 1], [8, 2], [8, 3], [8, 4], [8, 5], [8, 7], [8, 8],
-      [7, 8], [5, 8], [4, 8], [3, 8], [2, 8], [1, 8], [0, 8]
-    ];
-    const fmtCoordsB = [
-      [N - 1, 8], [N - 2, 8], [N - 3, 8], [N - 4, 8], [N - 5, 8], [N - 6, 8], [N - 7, 8],
-      [8, N - 8], [8, N - 7], [8, N - 6], [8, N - 5], [8, N - 4], [8, N - 3], [8, N - 2], [8, N - 1]
-    ];
-
-    for (let i = 0; i < 15; i++) {
-      const bit = (fmtBits >>> i) & 1;
-      mod[fmtCoordsA[i][0]][fmtCoordsA[i][1]] = bit;
-      mod[fmtCoordsB[i][0]][fmtCoordsB[i][1]] = bit;
-    }
-
-    return { N, isFunc, mod };
-  }
 
   function normalizeQrPayload(rawKeyOrUri) {
     const clean = (rawKeyOrUri || '').trim();
@@ -588,218 +494,50 @@
     if (parsed.pk) {
       return 'wex://?pk=' + parsed.pk.toLowerCase();
     }
-    return clean.substring(0, 74) || 'wex://?pk=' + '0'.repeat(64);
-  }
-
-  function buildIsoQrV4Matrix(payloadStr) {
-    const text = normalizeQrPayload(payloadStr);
-    const utf8 = new TextEncoder().encode(text);
-    const len = Math.min(utf8.length, 78);
-
-    const bits = [];
-    function pushBits(val, count) {
-      for (let i = count - 1; i >= 0; i--) {
-        bits.push((val >>> i) & 1);
-      }
-    }
-
-    // Byte mode indicator (0100) + 8-bit byte count
-    pushBits(0x04, 4);
-    pushBits(len, 8);
-    for (let i = 0; i < len; i++) {
-      pushBits(utf8[i], 8);
-    }
-
-    // Terminator up to 4 zero bits
-    const maxDataBits = QR_V4_DATA_CODEWORDS * 8;
-    for (let i = 0; i < 4 && bits.length < maxDataBits; i++) {
-      bits.push(0);
-    }
-    while (bits.length % 8 !== 0) {
-      bits.push(0);
-    }
-
-    const dataBytes = new Uint8Array(QR_V4_DATA_CODEWORDS);
-    const filledBytes = bits.length >>> 3;
-    for (let i = 0; i < filledBytes; i++) {
-      let b = 0;
-      for (let j = 0; j < 8; j++) {
-        b = (b << 1) | bits[i * 8 + j];
-      }
-      dataBytes[i] = b;
-    }
-    const padBytes = [0xec, 0x11];
-    for (let i = filledBytes; i < QR_V4_DATA_CODEWORDS; i++) {
-      dataBytes[i] = padBytes[(i - filledBytes) & 1];
-    }
-
-    const ecBytes = computeReedSolomonEc(dataBytes, QR_V4_EC_CODEWORDS);
-    const allBytes = new Uint8Array(QR_V4_DATA_CODEWORDS + QR_V4_EC_CODEWORDS);
-    allBytes.set(dataBytes, 0);
-    allBytes.set(ecBytes, QR_V4_DATA_CODEWORDS);
-
-    const { N, isFunc, mod } = createQrV4FunctionTemplate();
-
-    let bitIdx = 0;
-    const totalBits = allBytes.length * 8;
-    let upward = true;
-
-    for (let rightCol = N - 1; rightCol >= 1; rightCol -= 2) {
-      if (rightCol === 6) rightCol = 5;
-      for (let vert = 0; vert < N; vert++) {
-        const r = upward ? (N - 1 - vert) : vert;
-        for (let lr = 0; lr < 2; lr++) {
-          const c = rightCol - lr;
-          if (isFunc[r][c]) continue;
-          let bit = 0;
-          if (bitIdx < totalBits) {
-            bit = (allBytes[bitIdx >>> 3] >>> (7 - (bitIdx & 7))) & 1;
-            bitIdx++;
-          }
-          // Mask 0: (r + c) % 2 === 0
-          if ((r + c) % 2 === 0) bit ^= 1;
-          mod[r][c] = bit;
-        }
-      }
-      upward = !upward;
-    }
-
-    return mod;
-  }
-
-  function decodeIsoQrV4Matrix(modGrid) {
-    if (!modGrid || modGrid.length !== QR_V4_SIZE) return null;
-    const { N, isFunc } = createQrV4FunctionTemplate();
-
-    const bits = [];
-    let upward = true;
-    for (let rightCol = N - 1; rightCol >= 1; rightCol -= 2) {
-      if (rightCol === 6) rightCol = 5;
-      for (let vert = 0; vert < N; vert++) {
-        const r = upward ? (N - 1 - vert) : vert;
-        for (let lr = 0; lr < 2; lr++) {
-          const c = rightCol - lr;
-          if (isFunc[r][c]) continue;
-          let bit = modGrid[r][c] ? 1 : 0;
-          if ((r + c) % 2 === 0) bit ^= 1;
-          bits.push(bit);
-        }
-      }
-      upward = !upward;
-    }
-
-    function readBits(offset, count) {
-      let val = 0;
-      for (let i = 0; i < count; i++) {
-        val = (val << 1) | (bits[offset + i] || 0);
-      }
-      return val;
-    }
-
-    const mode = readBits(0, 4);
-    if (mode !== 0x04) return null;
-    const byteLen = readBits(4, 8);
-    if (byteLen <= 0 || byteLen > 78) return null;
-
-    const out = new Uint8Array(byteLen);
-    for (let i = 0; i < byteLen; i++) {
-      out[i] = readBits(12 + i * 8, 8);
-    }
-
-    try {
-      const str = new TextDecoder().decode(out);
-      const parsed = parseTargetInput(str);
-      if (parsed.pk || str.startsWith('wex://')) {
-        return str;
-      }
-    } catch (e) {}
-    return null;
-  }
-
-  function decodeWexQrFromImageData(imageData) {
-    if (!imageData || !imageData.data || !imageData.width || !imageData.height) return null;
-    const { data, width, height } = imageData;
-
-    // 1. Compute luminance threshold and locate bounding box of dark QR modules
-    let minLum = 255;
-    let maxLum = 0;
-    for (let i = 0; i < data.length; i += 16) {
-      const lum = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
-      if (lum < minLum) minLum = lum;
-      if (lum > maxLum) maxLum = lum;
-    }
-    const threshold = (minLum + maxLum) >> 1;
-
-    function isDarkPixel(x, y) {
-      const idx = (y * width + x) * 4;
-      if (data[idx + 3] < 128) return false;
-      const lum = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
-      return lum < threshold;
-    }
-
-    // Restrict scan region to central 92% of image to ignore outer frame borders
-    const marginX = Math.floor(width * 0.04);
-    const marginY = Math.floor(height * 0.04);
-
-    let minX = width;
-    let maxX = 0;
-    let minY = height;
-    let maxY = 0;
-
-    for (let y = marginY; y < height - marginY; y++) {
-      for (let x = marginX; x < width - marginX; x++) {
-        if (isDarkPixel(x, y)) {
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-    }
-
-    const boxW = maxX - minX + 1;
-    const boxH = maxY - minY + 1;
-    if (boxW < QR_V4_SIZE || boxH < QR_V4_SIZE) return null;
-
-    const N = QR_V4_SIZE;
-    const modGrid = Array.from({ length: N }, () => new Uint8Array(N));
-
-    for (let r = 0; r < N; r++) {
-      const sy = Math.min(height - 1, Math.floor(minY + ((r + 0.5) * boxH) / N));
-      for (let c = 0; c < N; c++) {
-        const sx = Math.min(width - 1, Math.floor(minX + ((c + 0.5) * boxW) / N));
-        modGrid[r][c] = isDarkPixel(sx, sy) ? 1 : 0;
-      }
-    }
-
-    return decodeIsoQrV4Matrix(modGrid);
+    return clean || ('wex://?pk=' + '0'.repeat(64));
   }
 
   function renderKeyMatrixCanvas(canvasOrId, hexKey) {
     const canvas = typeof canvasOrId === 'string' ? document.getElementById(canvasOrId) : canvasOrId;
     if (!canvas || !canvas.getContext) return;
 
-    const matrix = buildIsoQrV4Matrix(hexKey || myPublicKey || '0'.repeat(64));
-    const N = matrix.length;
+    if (typeof window === 'undefined' || typeof window.qrcode !== 'function') {
+      console.warn('QR generator library (window.qrcode) is not available');
+      return;
+    }
+
+    const payload = normalizeQrPayload(hexKey || myPublicKey || '0'.repeat(64));
+
+    let qr;
+    try {
+      qr = window.qrcode(0, 'M');
+      qr.addData(payload);
+      qr.make();
+    } catch (err) {
+      console.error('Failed to generate standard QR code:', err);
+      return;
+    }
+
+    const moduleCount = qr.getModuleCount();
     const quietZone = 4;
-    const totalModules = N + quietZone * 2;
+    const totalModules = moduleCount + quietZone * 2;
 
     const targetSize = canvas.width || 205;
-    const cellSize = Math.max(3, Math.floor(targetSize / totalModules));
+    const cellSize = Math.max(1, Math.floor(targetSize / totalModules));
     const actualSize = cellSize * totalModules;
     const offset = Math.floor((targetSize - actualSize) / 2);
 
     const ctx = canvas.getContext('2d');
-    const bgColor = '#f5f3ff';
-    const fgPrimary = '#181622';
+    const bgColor = '#ffffff';
+    const fgPrimary = '#000000';
 
     ctx.fillStyle = bgColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.fillStyle = fgPrimary;
-    for (let r = 0; r < N; r++) {
-      for (let c = 0; c < N; c++) {
-        if (matrix[r][c]) {
+    for (let r = 0; r < moduleCount; r++) {
+      for (let c = 0; c < moduleCount; c++) {
+        if (qr.isDark(r, c)) {
           ctx.fillRect(
             offset + (c + quietZone) * cellSize,
             offset + (r + quietZone) * cellSize,
@@ -814,7 +552,7 @@
   function renderAllKeyCanvases(hexKey) {
     const keyToRender = hexKey || myPublicKey;
     if (!keyToRender) return;
-    const ids = ['profile-qr-canvas', 'invite-qr-canvas', 'identity-qr-canvas', 'qr-canvas', 'key-matrix-canvas'];
+    const ids = ['profile-qr-canvas', 'invite-qr-canvas', 'identity-qr-canvas', 'qr-canvas', 'key-matrix-canvas', 'welcome-qr-canvas'];
     ids.forEach((id) => {
       const c = document.getElementById(id);
       if (c) renderKeyMatrixCanvas(c, keyToRender);
@@ -917,7 +655,7 @@
       } catch (e) {}
     }
 
-    // 2. Built-in pure-JS optical matrix decoder fallback
+    // 2. Robust jsQR optical decoder on video frame
     if (scanCanvas && scanCanvas.getContext) {
       const ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
       const w = scanCanvas.width || 320;
@@ -925,9 +663,11 @@
       ctx.drawImage(video, 0, 0, w, h);
       try {
         const imgData = ctx.getImageData(0, 0, w, h);
-        const decoded = decodeWexQrFromImageData(imgData);
-        if (decoded) {
-          onQrPayloadDecoded(decoded);
+        if (typeof window !== 'undefined' && typeof window.jsQR === 'function') {
+          const code = window.jsQR(imgData.data, w, h, { inversionAttempts: 'attemptBoth' });
+          if (code && code.data) {
+            onQrPayloadDecoded(code.data);
+          }
         }
       } catch (e) {}
     }
@@ -1033,12 +773,14 @@
           } catch (e) {}
         }
 
-        // 2. Built-in pure-JS optical matrix decoder
+        // 2. Robust jsQR optical decoder
         try {
           const imgData = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
-          const decoded = decodeWexQrFromImageData(imgData);
-          if (decoded && onQrPayloadDecoded(decoded)) {
-            return;
+          if (typeof window !== 'undefined' && typeof window.jsQR === 'function') {
+            const code = window.jsQR(imgData.data, scanCanvas.width, scanCanvas.height, { inversionAttempts: 'attemptBoth' });
+            if (code && code.data && onQrPayloadDecoded(code.data)) {
+              return;
+            }
           }
         } catch (e) {}
 
@@ -1283,11 +1025,19 @@
     if (!container) return;
     container.innerHTML = '';
 
-    const activeSp = spacesCache.find((s) => s.id === currentSpaceId) || spacesCache[0];
-    setText(['server-title'], activeSp ? activeSp.name : 'Моё сообщество');
-    setText(['active-swarm-id-label'], 'Общие комнаты и каналы');
+    const activeSp = spacesCache.find((s) => s.id === currentSpaceId);
+    setText(['server-title'], activeSp ? activeSp.name : 'Нет выбранной группы');
+    setText(['active-swarm-id-label'], activeSp ? 'Общие комнаты и каналы' : 'Создайте группу (+) для общения');
 
-    const chs = (activeSp && Array.isArray(activeSp.channels)) ? activeSp.channels : ['general'];
+    const chs = (activeSp && Array.isArray(activeSp.channels)) ? activeSp.channels : [];
+    if (chs.length === 0) {
+      const hint = document.createElement('div');
+      hint.className = 'empty-list-hint';
+      hint.textContent = 'Создайте группу (+) или подключитесь по приглашению друга';
+      container.appendChild(hint);
+      return;
+    }
+
     chs.forEach((ch) => {
       const isAct = activeChatMode === 'swarm' && currentChannel === ch;
       const div = document.createElement('div');
@@ -1323,8 +1073,8 @@
 
   function renderIdentityPanel() {
     window.myPublicKey = myPublicKey;
-    setText(['my-nickname'], myNick);
-    setText(['my-avatar'], (myNick || 'Я').charAt(0).toUpperCase());
+    setText(['my-nickname', 'welcome-user-name'], myNick);
+    setText(['my-avatar', 'welcome-user-avatar'], (myNick || 'Я').charAt(0).toUpperCase());
 
     const isConnected = Boolean(ws && ws.readyState === WebSocket.OPEN);
     const friendlyStatus = !isConnected
@@ -1349,6 +1099,7 @@
   /* ======================== MESSAGE FEED RENDERING ======================== */
   function messageMatchesCurrentConversation(msg) {
     if (!msg) return false;
+    if (isWelcomeMode()) return false;
     const msgCh = msg.channel || 'general';
 
     if (activeChatMode === 'dm' && currentDmPeerPk) {
@@ -1366,7 +1117,7 @@
       return false;
     }
 
-    if (activeChatMode === 'swarm') {
+    if (activeChatMode === 'swarm' && currentSpaceId) {
       return msgCh === currentChannel;
     }
     return false;
@@ -1389,10 +1140,99 @@
     return unique;
   }
 
+  function renderWelcomeScreen(feed) {
+    if (!feed) return;
+    const avatarLetter = (myNick || 'Я').charAt(0).toUpperCase();
+
+    feed.innerHTML = `
+      <div class="welcome-container">
+        <!-- Hero Card -->
+        <div class="welcome-hero-card">
+          <div class="welcome-user-header">
+            <div class="welcome-avatar" id="welcome-user-avatar">${escapeHtml(avatarLetter)}</div>
+            <div class="welcome-user-meta">
+              <span class="welcome-user-greeting">Добро пожаловать в Wex-Chat</span>
+              <h2 class="welcome-user-name" id="welcome-user-name">${escapeHtml(myNick || 'Пользователь')}</h2>
+              <div class="welcome-user-badge">
+                <span class="welcome-user-badge-dot"></span>
+                <span>Суверенный аккаунт • Без KYC, номеров и центральных серверов</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Personal QR Section -->
+          <div class="welcome-qr-section">
+            <div class="welcome-qr-frame" onclick="openInviteModal()" style="cursor:pointer" title="Нажмите, чтобы открыть меню приглашения">
+              <canvas id="welcome-qr-canvas" width="140" height="140"></canvas>
+            </div>
+            <div class="welcome-qr-info">
+              <div class="welcome-qr-title">Ваш персональный QR-код</div>
+              <div class="welcome-qr-desc">Покажите этот код другу для мгновенного добавления в контакты или отправьте ссылку-приглашение.</div>
+              <button class="btn primary welcome-share-btn" onclick="shareInviteNative()">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                <span>Поделиться кодом</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Three Big Action Cards -->
+        <div class="welcome-actions-title">Быстрый старт</div>
+        <div class="welcome-actions-grid">
+          <div class="welcome-action-card" onclick="openQrScannerModal()">
+            <div class="welcome-action-icon cam">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+              </svg>
+            </div>
+            <div class="welcome-action-headline">📷 Сканировать QR друга</div>
+            <div class="welcome-action-sub">Отсканируйте код камерой устройства или загрузите изображение с QR для связи</div>
+          </div>
+
+          <div class="welcome-action-card" onclick="openConnectModal()">
+            <div class="welcome-action-icon user">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="8.5" cy="7" r="4"/>
+                <line x1="20" y1="8" x2="20" y2="14"/>
+                <line x1="23" y1="11" x2="17" y2="11"/>
+              </svg>
+            </div>
+            <div class="welcome-action-headline">👤 Написать по коду</div>
+            <div class="welcome-action-sub">Вставьте ссылку wex://join/... или публичный ключ друга для начала личного чата</div>
+          </div>
+
+          <div class="welcome-action-card" onclick="openInputModal('create_space')">
+            <div class="welcome-action-icon group">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                <circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+            </div>
+            <div class="welcome-action-headline">👥 Создать группу</div>
+            <div class="welcome-action-sub">Организуйте сообщество с текстовыми каналами и P2P голосовыми комнатами</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    if (myPublicKey) {
+      renderAllKeyCanvases(myPublicKey);
+    }
+  }
+
   function renderHistory(historyList) {
     const feed = getEl('messages', 'chat-messages');
     if (!feed) return;
     feed.innerHTML = '';
+
+    if (isWelcomeMode()) {
+      renderWelcomeScreen(feed);
+      return;
+    }
 
     const sorted = normalizeAndSortHistory(historyList || []);
     const filtered = sorted.filter(messageMatchesCurrentConversation);
@@ -1406,13 +1246,15 @@
             <h3>Начните диалог с ${escapeHtml(name)}</h3>
             <p>Напишите первое сообщение ниже. Даже если собеседник сейчас не в сети, сообщение бережно сохранится и дойдет, как только он появится.</p>
           </div>`;
-      } else {
+      } else if (activeChatMode === 'swarm' && currentSpaceId) {
         feed.innerHTML = `
           <div class="empty-state">
             <span class="empty-state-tag">Комната сообщества</span>
-            <h3>Добро пожаловать в #${escapeHtml(currentChannel)}</h3>
+            <h3>Добро пожаловать в #${escapeHtml(currentChannel || 'общий')}</h3>
             <p>Здесь пока тихо. Напишите первое сообщение или поделитесь ссылкой-приглашением с друзьями.</p>
           </div>`;
+      } else {
+        renderWelcomeScreen(feed);
       }
       return;
     }
@@ -1426,6 +1268,9 @@
 
     const emptyEl = feed.querySelector('.empty-state');
     if (emptyEl) emptyEl.remove();
+
+    const welcomeEl = feed.querySelector('.welcome-container');
+    if (welcomeEl) welcomeEl.remove();
 
     const sig = msg.signature || ('local-' + (msg.timestamp_ms || Date.now()));
     if (sig && document.getElementById('msg-' + sig)) {
@@ -1553,6 +1398,11 @@
   }
 
   function submitCurrentMessage() {
+    if (isWelcomeMode()) {
+      showToast('Выберите диалог или группу для отправки сообщения');
+      return;
+    }
+
     const inputEl = getEl('msg-input', 'chat-input');
     if (!inputEl) return;
     const text = inputEl.value.trim();
@@ -1575,13 +1425,16 @@
       });
       saveContacts();
       renderContactList();
-    } else {
+    } else if (activeChatMode === 'swarm' && currentSpaceId && currentChannel) {
       ws.send(JSON.stringify({
         action: 'send_message',
         space_id: currentSpaceId,
         channel: currentChannel,
         text: text
       }));
+    } else {
+      showToast('Выберите диалог или группу для отправки сообщения');
+      return;
     }
 
     inputEl.value = '';
@@ -2008,10 +1861,14 @@
         myWanEndpoint = data.identity.external_endpoint || '';
       }
 
-      if (Array.isArray(data.spaces) && data.spaces.length > 0) {
+      if (Array.isArray(data.spaces)) {
         spacesCache = data.spaces;
-        const activeSp = data.spaces.find((s) => s.id === currentSpaceId) || data.spaces[0];
-        currentSpaceId = activeSp.id;
+        if (spacesCache.length > 0 && currentSpaceId) {
+          const activeSp = data.spaces.find((s) => s.id === currentSpaceId) || data.spaces[0];
+          currentSpaceId = activeSp.id;
+        } else if (spacesCache.length === 0) {
+          currentSpaceId = '';
+        }
       }
 
       if (Array.isArray(data.peers)) {
@@ -2028,14 +1885,6 @@
 
       mergePeersAndHistoryIntoContacts(peersCache, historyCache);
 
-      if (!currentDmPeerPk && activeChatMode === 'dm') {
-        const contactKeys = Object.keys(contacts);
-        if (contactKeys.length > 0) {
-          currentDmPeerPk = contactKeys[0];
-          currentChannel = dmChannelForPk(currentDmPeerPk);
-        }
-      }
-
       renderIdentityPanel();
       renderContactList();
       renderPeersList();
@@ -2050,7 +1899,10 @@
         const vBar = getEl('voice-bar');
         const vBtn = getEl('voice-btn');
         const vBadge = getEl('voice-badge');
-        if (vBar) vBar.classList.toggle('active', voiceConnected);
+        if (vBar) {
+          vBar.classList.toggle('active', voiceConnected);
+          vBar.style.display = voiceConnected ? 'flex' : 'none';
+        }
         if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
         if (vBadge) vBadge.textContent = voiceConnected ? 'На связи' : 'Войти';
       }
@@ -2148,7 +2000,10 @@
       const vBar = getEl('voice-bar');
       const vBtn = getEl('voice-btn');
       const vBadge = getEl('voice-badge');
-      if (vBar) vBar.classList.toggle('active', voiceConnected);
+      if (vBar) {
+        vBar.classList.toggle('active', voiceConnected);
+        vBar.style.display = voiceConnected ? 'flex' : 'none';
+      }
       if (vBtn) vBtn.classList.toggle('connected', voiceConnected);
       if (vBadge) vBadge.textContent = voiceConnected ? 'На связи' : 'Войти';
       return;
@@ -2253,11 +2108,19 @@
 
   /* ======================== INITIALIZATION & GLOBAL EXPORTS ======================== */
   function initWexApp() {
+    voiceConnected = false;
+    const vBar = getEl('voice-bar');
+    if (vBar) {
+      vBar.classList.remove('active');
+      vBar.style.display = 'none';
+    }
     loadContacts();
     ensureQrScannerElements();
     bindEvents();
     selectTab('dms');
     renderContactList();
+    updateChatHeader();
+    renderHistory(historyCache);
     connectWS();
   }
 
@@ -2273,6 +2136,7 @@
   window.switchSpace = switchSpace;
   window.switchChannel = switchChannel;
   window.startDirectMessage = startDirectMessage;
+  window.renderWelcomeScreen = renderWelcomeScreen;
   window.copyTextWithToast = copyTextWithToast;
   window.pasteIntoInput = pasteIntoInput;
   window.shareInviteNative = shareInviteNative;
@@ -2306,9 +2170,6 @@
   window.closeQrScannerModal = closeQrScannerModal;
   window.switchScannerCamera = switchScannerCamera;
   window.handleQrImageFile = handleQrImageFile;
-  window.buildIsoQrV4Matrix = buildIsoQrV4Matrix;
-  window.decodeIsoQrV4Matrix = decodeIsoQrV4Matrix;
-  window.decodeWexQrFromImageData = decodeWexQrFromImageData;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initWexApp);

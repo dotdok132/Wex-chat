@@ -308,7 +308,7 @@
        PERSISTENT VOICE STATUS BANNER (When Voice Room is Active)
        ========================================================================= */
     .voice-status-bar {
-      display: none;
+      display: none !important;
       align-items: center;
       justify-content: space-between;
       margin: 0 14px 10px 14px;
@@ -319,7 +319,7 @@
       flex-shrink: 0;
     }
     .voice-status-bar.active {
-      display: flex;
+      display: flex !important;
     }
     .voice-conn-info {
       display: flex;
@@ -1033,6 +1033,301 @@
       line-height: 1.5;
     }
 
+    /* =========================================================================
+       MODERN WELCOME SCREEN (INITIAL ZERO-STATE / HERO)
+       ========================================================================= */
+    .welcome-container {
+      margin: auto;
+      max-width: 660px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      padding: 16px 8px;
+      animation: welcomeFadeIn 0.28s ease-out;
+    }
+
+    @keyframes welcomeFadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Hero Card */
+    .welcome-hero-card {
+      background: linear-gradient(135deg, rgba(32, 29, 45, 0.95), rgba(24, 22, 34, 0.95));
+      border: 1px solid var(--line-strong);
+      border-radius: 28px;
+      padding: 26px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .welcome-hero-card::before {
+      content: '';
+      position: absolute;
+      top: -60px;
+      right: -60px;
+      width: 220px;
+      height: 220px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(184, 169, 255, 0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .welcome-user-header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .welcome-avatar {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent-lavender), #7c5cff);
+      color: #0d0c13;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      font-weight: 800;
+      flex-shrink: 0;
+      box-shadow: 0 6px 20px rgba(184, 169, 255, 0.3);
+    }
+
+    .welcome-user-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .welcome-user-greeting {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent-lavender);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .welcome-user-name {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin: 0;
+    }
+
+    .welcome-user-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--sig-emerald);
+      margin-top: 2px;
+    }
+
+    .welcome-user-badge-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--sig-emerald);
+      box-shadow: 0 0 8px var(--sig-emerald);
+    }
+
+    /* QR Section inside Hero Card */
+    .welcome-qr-section {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+      background: rgba(13, 12, 19, 0.55);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 16px 20px;
+    }
+
+    .welcome-qr-frame {
+      background: #ffffff;
+      padding: 8px;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      flex-shrink: 0;
+      transition: transform 0.18s ease;
+    }
+
+    .welcome-qr-frame:hover {
+      transform: scale(1.03);
+    }
+
+    .welcome-qr-frame canvas {
+      display: block;
+      width: 140px;
+      height: 140px;
+      border-radius: 6px;
+    }
+
+    .welcome-qr-info {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .welcome-qr-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+
+    .welcome-qr-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    .welcome-share-btn {
+      align-self: flex-start;
+      margin-top: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 999px;
+    }
+
+    /* Three Big Action Cards */
+    .welcome-actions-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      margin-left: 6px;
+    }
+
+    .welcome-actions-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .welcome-action-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 20px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+      position: relative;
+      overflow: hidden;
+      text-align: left;
+    }
+
+    .welcome-action-card:hover {
+      background: var(--bg-card);
+      border-color: var(--accent-lavender);
+      transform: translateY(-3px);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    }
+
+    .welcome-action-card:active {
+      transform: translateY(-1px);
+    }
+
+    .welcome-action-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: transform 0.2s ease;
+    }
+
+    .welcome-action-card:hover .welcome-action-icon {
+      transform: scale(1.08);
+    }
+
+    .welcome-action-icon.cam {
+      background: rgba(184, 169, 255, 0.16);
+      color: var(--accent-lavender);
+    }
+
+    .welcome-action-icon.user {
+      background: rgba(74, 222, 128, 0.16);
+      color: var(--sig-emerald);
+    }
+
+    .welcome-action-icon.group {
+      background: rgba(251, 191, 36, 0.16);
+      color: #fbbf24;
+    }
+
+    .welcome-action-headline {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1.35;
+    }
+
+    .welcome-action-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+    /* Input hint bar when on welcome screen */
+    .welcome-input-hint {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 18px;
+      background: var(--bg-surface);
+      border: 1px dashed var(--line-strong);
+      border-radius: 22px;
+      color: var(--text-muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 768px) {
+      .welcome-actions-grid {
+        grid-template-columns: 1fr;
+      }
+      .welcome-qr-section {
+        flex-direction: column;
+        text-align: center;
+        align-items: center;
+      }
+      .welcome-share-btn {
+        align-self: center;
+      }
+      .welcome-user-header {
+        flex-direction: column;
+        text-align: center;
+      }
+      .welcome-user-badge {
+        justify-content: center;
+      }
+    }
+
     /* Friendly Rounded Chat Bubbles (Telegram / iMessage style) */
     .msg-group {
       display: flex;
@@ -1457,7 +1752,7 @@
       </nav>
 
       <!-- Persistent Voice Status Bar (visible when in voice room) -->
-      <div class="voice-status-bar" id="voice-bar">
+      <div class="voice-status-bar" id="voice-bar" style="display:none;">
         <div class="voice-conn-info">
           <span class="voice-conn-title">Голосовая комната активна</span>
           <span class="voice-conn-sub" id="voice-sub">Чистый звук</span>
@@ -1655,15 +1950,15 @@
     <main id="detail-pane">
       <header class="chat-header" id="chat-header">
         <div class="chat-header-left">
-          <button id="btn-back-to-list" onclick="closeMobileConversation()" title="Назад к списку">
+          <button id="btn-back-to-list" onclick="closeMobileConversation()" title="Назад к списку" style="display:none;">
             ← Назад
           </button>
           <div class="chat-title-stack">
             <div class="chat-title-row">
-              <span id="channel-prefix">Чат</span>
-              <span id="active-channel-name">Личные сообщения</span>
+              <span id="channel-prefix" style="display:none;"></span>
+              <span id="active-channel-name">Wex-Chat</span>
             </div>
-            <span id="active-channel-topic">Приватная беседа</span>
+            <span id="active-channel-topic">Приватный мессенджер</span>
           </div>
         </div>
         <div class="chat-header-actions">
@@ -1673,15 +1968,86 @@
       </header>
 
       <div class="messages-feed" id="messages">
-        <div class="empty-state">
-          <span class="empty-state-tag">Уютное общение</span>
-          <h3>Личные сообщения</h3>
-          <p>Выберите друга слева или нажмите «+ Написать другу», чтобы начать тёплую и приватную беседу.</p>
+        <div class="welcome-container">
+          <!-- Hero Card -->
+          <div class="welcome-hero-card">
+            <div class="welcome-user-header">
+              <div class="welcome-avatar" id="welcome-user-avatar">Я</div>
+              <div class="welcome-user-meta">
+                <span class="welcome-user-greeting">Добро пожаловать в Wex-Chat</span>
+                <h2 class="welcome-user-name" id="welcome-user-name">Пользователь</h2>
+                <div class="welcome-user-badge">
+                  <span class="welcome-user-badge-dot"></span>
+                  <span>Суверенный аккаунт • Без KYC, номеров и центральных серверов</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- QR Section -->
+            <div class="welcome-qr-section">
+              <div class="welcome-qr-frame" onclick="openInviteModal()" style="cursor:pointer" title="Нажмите, чтобы открыть меню приглашения">
+                <canvas id="welcome-qr-canvas" width="140" height="140"></canvas>
+              </div>
+              <div class="welcome-qr-info">
+                <div class="welcome-qr-title">Ваш персональный QR-код</div>
+                <div class="welcome-qr-desc">Покажите этот код другу для мгновенного добавления в контакты или отправьте ссылку-приглашение.</div>
+                <button class="btn primary welcome-share-btn" onclick="shareInviteNative()">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                  <span>Поделиться кодом</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Three Big Action Cards -->
+          <div class="welcome-actions-title">Быстрый старт</div>
+          <div class="welcome-actions-grid">
+            <div class="welcome-action-card" onclick="openQrScannerModal()">
+              <div class="welcome-action-icon cam">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+              </div>
+              <div class="welcome-action-headline">📷 Сканировать QR друга</div>
+              <div class="welcome-action-sub">Отсканируйте код камерой устройства или загрузите изображение с QR для связи</div>
+            </div>
+
+            <div class="welcome-action-card" onclick="openConnectModal()">
+              <div class="welcome-action-icon user">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                  <circle cx="8.5" cy="7" r="4"/>
+                  <line x1="20" y1="8" x2="20" y2="14"/>
+                  <line x1="23" y1="11" x2="17" y2="11"/>
+                </svg>
+              </div>
+              <div class="welcome-action-headline">👤 Написать по коду</div>
+              <div class="welcome-action-sub">Вставьте ссылку wex://join/... или публичный ключ друга для начала личного чата</div>
+            </div>
+
+            <div class="welcome-action-card" onclick="openInputModal('create_space')">
+              <div class="welcome-action-icon group">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+              </div>
+              <div class="welcome-action-headline">👥 Создать группу</div>
+              <div class="welcome-action-sub">Организуйте сообщество с текстовыми каналами и P2P голосовыми комнатами</div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="input-box">
-        <div class="input-wrapper">
+      <div class="input-box" id="chat-input-box">
+        <div class="welcome-input-hint" id="welcome-input-hint" style="display:flex;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span>Выберите собеседника слева или используйте карточки быстрого старта</span>
+        </div>
+        <div class="input-wrapper" id="chat-input-wrapper" style="display:none;">
           <input type="file" id="file-input" style="display:none" onchange="handleFileUpload(event)">
           <button class="attach-btn" id="btn-attach-file" title="Прикрепить фото или файл" onclick="document.getElementById('file-input').click()">+</button>
           <input type="text" id="msg-input" placeholder="Напишите сообщение..." autocomplete="off">
@@ -1793,6 +2159,7 @@
     </div>
   </div>
 
+  <script src="qr_engine.js"></script>
   <script src="wex_app.js"></script>
 </body>
 </html>

@@ -74,6 +74,7 @@ func main() {
 		fmt.Println("\n[*] Shutting down Wex-Chat daemon gracefully...")
 		cancel()
 		p2pNode.Close()
+		_ = server.Close()
 		os.Exit(0)
 	}()
 

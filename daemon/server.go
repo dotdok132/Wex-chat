@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,14 +27,16 @@ type Server struct {
 	dataDir  string
 
 	mu             sync.RWMutex
-	clients        map[*websocket.Conn]bool
+	clients        map[*websocket.Conn]*sync.Mutex
 	activeSpaceID  string
 	activeChannel  string
 	spaces         []Space
 	voiceConnected bool
 	voiceChannel   string
 
-	upgrader websocket.Upgrader
+	upgrader   websocket.Upgrader
+	httpServer *http.Server
+	listener   net.Listener
 }
 
 func NewServer(port int, webDir, dataDir string, ident *Identity, storage *Storage, node *P2PNode) *Server {
@@ -47,12 +50,6 @@ func NewServer(port int, webDir, dataDir string, ident *Identity, storage *Stora
 		}
 	}
 
-	defaultSpace := Space{
-		ID:       DefaultSpaceHex,
-		Name:     "Общее пространство",
-		Channels: []string{"general", "dev", "voice-lounge"},
-	}
-
 	s := &Server{
 		httpPort:      port,
 		webDir:        resolvedWebDir,
@@ -60,29 +57,33 @@ func NewServer(port int, webDir, dataDir string, ident *Identity, storage *Stora
 		storage:       storage,
 		node:          node,
 		dataDir:       dataDir,
-		clients:       make(map[*websocket.Conn]bool),
-		activeSpaceID: DefaultSpaceHex,
-		activeChannel: "general",
-		spaces:        []Space{defaultSpace},
+		clients:       make(map[*websocket.Conn]*sync.Mutex),
+		activeSpaceID:  "",
+		activeChannel:  "",
+		spaces:         []Space{},
+		voiceConnected: false,
+		voiceChannel:   "",
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 	}
 
-	// Register P2P callbacks
-	node.SetCallbacks(
-		func(msg Message) {
-			s.BroadcastJSON(msg)
-		},
-		func() {
-			s.BroadcastJSON(s.buildStatus())
-		},
-	)
+	// Register P2P callbacks if node is provided
+	if node != nil {
+		node.SetCallbacks(
+			func(msg Message) {
+				s.BroadcastJSON(msg)
+			},
+			func() {
+				s.BroadcastJSON(s.buildStatus())
+			},
+		)
+	}
 
 	return s
 }
 
-func (s *Server) Start() error {
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	// 1. Static web assets
@@ -99,9 +100,78 @@ func (s *Server) Start() error {
 	// 2. Explicit /ws endpoint
 	mux.HandleFunc("/ws", s.handleWS)
 
+	return mux
+}
+
+func (s *Server) Start() error {
 	addr := fmt.Sprintf("0.0.0.0:%d", s.httpPort)
-	log.Printf("[+] Wex Web UI & WebSocket daemon: http://127.0.0.1:%d", s.httpPort)
-	return http.ListenAndServe(addr, mux)
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
+}
+
+func (s *Server) Serve(ln net.Listener) error {
+	s.mu.Lock()
+	s.listener = ln
+	if tcpAddr, ok := ln.Addr().(*net.TCPAddr); ok {
+		s.httpPort = tcpAddr.Port
+	}
+	s.httpServer = &http.Server{
+		Handler: s.Handler(),
+	}
+	s.mu.Unlock()
+
+	log.Printf("[+] Wex Web UI & WebSocket daemon: http://%s", ln.Addr().String())
+	err := s.httpServer.Serve(ln)
+	if err == http.ErrServerClosed {
+		return nil
+	}
+	return err
+}
+
+func (s *Server) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for conn, mu := range s.clients {
+		mu.Lock()
+		_ = conn.Close()
+		mu.Unlock()
+	}
+	s.clients = make(map[*websocket.Conn]*sync.Mutex)
+
+	if s.httpServer != nil {
+		return s.httpServer.Close()
+	}
+	if s.listener != nil {
+		return s.listener.Close()
+	}
+	return nil
+}
+
+func (s *Server) Addr() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.listener != nil {
+		return s.listener.Addr().String()
+	}
+	return fmt.Sprintf("127.0.0.1:%d", s.httpPort)
+}
+
+func (s *Server) sendConnJSON(conn *websocket.Conn, v interface{}) error {
+	s.mu.RLock()
+	connMu := s.clients[conn]
+	s.mu.RUnlock()
+
+	if connMu == nil {
+		return fmt.Errorf("connection not registered")
+	}
+
+	connMu.Lock()
+	defer connMu.Unlock()
+	return conn.WriteJSON(v)
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -110,19 +180,23 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	connMu := &sync.Mutex{}
 	s.mu.Lock()
-	s.clients[conn] = true
+	s.clients[conn] = connMu
 	s.mu.Unlock()
 
 	defer func() {
 		s.mu.Lock()
 		delete(s.clients, conn)
 		s.mu.Unlock()
+
+		connMu.Lock()
 		_ = conn.Close()
+		connMu.Unlock()
 	}()
 
 	// Send initial status
-	_ = conn.WriteJSON(s.buildStatus())
+	_ = s.sendConnJSON(conn, s.buildStatus())
 
 	for {
 		_, p, err := conn.ReadMessage()
@@ -142,7 +216,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 	switch a.Action {
 	case "get_status":
-		_ = conn.WriteJSON(s.buildStatus())
+		_ = s.sendConnJSON(conn, s.buildStatus())
 
 	case "connect_peer", "add_contact", "join_invite":
 		target := a.Target
@@ -163,7 +237,46 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 			}
 		}
 
-		if target != "" {
+		if strings.HasPrefix(target, "wex://join/") {
+			uriPart := strings.TrimPrefix(target, "wex://join/")
+			parts := strings.Split(uriPart, "?")
+			spID := parts[0]
+			spName := "Joined Space"
+			if len(parts) > 1 {
+				for _, param := range strings.Split(parts[1], "&") {
+					if strings.HasPrefix(param, "name=") {
+						spName = strings.ReplaceAll(strings.TrimPrefix(param, "name="), "_", " ")
+					}
+				}
+			}
+			if spID != "" {
+				s.mu.Lock()
+				exists := false
+				for _, sp := range s.spaces {
+					if sp.ID == spID {
+						exists = true
+						break
+					}
+				}
+				if !exists {
+					s.spaces = append(s.spaces, Space{
+						ID:       spID,
+						Name:     spName,
+						Channels: []string{"general", "dev", "voice-lounge"},
+					})
+				}
+				s.activeSpaceID = spID
+				s.activeChannel = "general"
+				s.mu.Unlock()
+
+				if s.node != nil {
+					_ = s.node.SubscribeChannel(spID, "general")
+				}
+				s.BroadcastJSON(s.buildStatus())
+			}
+		}
+
+		if target != "" && s.node != nil {
 			go func() {
 				if err := s.node.ConnectPeer(target); err == nil {
 					s.BroadcastJSON(s.buildStatus())
@@ -171,13 +284,46 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 			}()
 		}
 
+	case "join_space":
+		if a.SpaceID != "" {
+			s.mu.Lock()
+			exists := false
+			for _, sp := range s.spaces {
+				if sp.ID == a.SpaceID {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				spName := a.Name
+				if spName == "" {
+					spName = "Joined Space"
+				}
+				s.spaces = append(s.spaces, Space{
+					ID:       a.SpaceID,
+					Name:     spName,
+					Channels: []string{"general", "dev", "voice-lounge"},
+				})
+			}
+			s.activeSpaceID = a.SpaceID
+			s.activeChannel = "general"
+			s.mu.Unlock()
+
+			if s.node != nil {
+				_ = s.node.SubscribeChannel(a.SpaceID, "general")
+			}
+			s.BroadcastJSON(s.buildStatus())
+		}
+
 	case "switch_space":
 		if a.SpaceID != "" {
 			s.mu.Lock()
 			s.activeSpaceID = a.SpaceID
 			s.mu.Unlock()
-			_ = s.node.SubscribeChannel(s.activeSpaceID, s.activeChannel)
-			_ = conn.WriteJSON(s.buildStatus())
+			if s.node != nil {
+				_ = s.node.SubscribeChannel(s.activeSpaceID, s.activeChannel)
+			}
+			_ = s.sendConnJSON(conn, s.buildStatus())
 		}
 
 	case "create_space":
@@ -195,7 +341,9 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 			s.activeChannel = "general"
 			s.mu.Unlock()
 
-			_ = s.node.SubscribeChannel(spID, "general")
+			if s.node != nil {
+				_ = s.node.SubscribeChannel(spID, "general")
+			}
 			s.BroadcastJSON(s.buildStatus())
 		}
 
@@ -218,7 +366,9 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 				}
 			}
 			s.mu.Unlock()
-			_ = s.node.SubscribeChannel(s.activeSpaceID, a.Name)
+			if s.node != nil {
+				_ = s.node.SubscribeChannel(s.activeSpaceID, a.Name)
+			}
 			s.BroadcastJSON(s.buildStatus())
 		}
 
@@ -227,8 +377,10 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 			s.mu.Lock()
 			s.activeChannel = a.Name
 			s.mu.Unlock()
-			_ = s.node.SubscribeChannel(s.activeSpaceID, s.activeChannel)
-			_ = conn.WriteJSON(s.buildStatus())
+			if s.node != nil {
+				_ = s.node.SubscribeChannel(s.activeSpaceID, s.activeChannel)
+			}
+			_ = s.sendConnJSON(conn, s.buildStatus())
 		}
 
 	case "set_profile":
@@ -236,7 +388,7 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 		s.BroadcastJSON(s.buildStatus())
 
 	case "export_secret":
-		_ = conn.WriteJSON(map[string]interface{}{
+		_ = s.sendConnJSON(conn, map[string]interface{}{
 			"type":       "secret_exported",
 			"seed_hex":   s.ident.SeedHex,
 			"public_key": s.ident.PubHex,
@@ -246,10 +398,13 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 		seedHex := a.SeedHex
 		if len(seedHex) == 64 {
 			if seedBytes, err := hex.DecodeString(seedHex); err == nil && len(seedBytes) == 32 {
-				newIdent, err := NewIdentityFromSeed(seedBytes, s.ident.Nickname, s.ident.Status)
+				nick, status := s.ident.GetProfile()
+				newIdent, err := NewIdentityFromSeed(seedBytes, nick, status)
 				if err == nil {
+					s.mu.Lock()
 					s.ident = newIdent
-					_ = s.ident.Save(s.dataDir)
+					s.mu.Unlock()
+					_ = newIdent.Save(s.dataDir)
 					s.BroadcastJSON(s.buildStatus())
 				}
 			}
@@ -262,16 +417,23 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 		}
 		ch := a.Channel
 		if ch == "" {
+			s.mu.RLock()
 			ch = s.activeChannel
+			s.mu.RUnlock()
 		}
 		if content != "" {
+			nick, _ := s.ident.GetProfile()
 			ts := time.Now().UnixMilli()
-			signPayload := []byte(fmt.Sprintf("%s:%s:%d:%s", s.ident.Nickname, ch, ts, content))
+			signPayload := []byte(fmt.Sprintf("%s:%s:%d:%s", nick, ch, ts, content))
 			sig := s.ident.Sign(signPayload)
+
+			s.mu.RLock()
+			actSpace := s.activeSpaceID
+			s.mu.RUnlock()
 
 			msg := Message{
 				Type:        "message",
-				Author:      s.ident.Nickname,
+				Author:      nick,
 				AuthorPK:    s.ident.PubHex,
 				Channel:     ch,
 				Content:     content,
@@ -279,12 +441,14 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 				Encrypted:   false,
 				Signature:   hex.EncodeToString(sig),
 				TimestampMS: ts,
-				SpaceID:     s.activeSpaceID,
+				SpaceID:     actSpace,
 			}
 
 			s.storage.AddMessage(msg)
 			s.BroadcastJSON(msg)
-			_ = s.node.PublishMessage(s.activeSpaceID, ch, msg)
+			if s.node != nil {
+				_ = s.node.PublishMessage(actSpace, ch, msg)
+			}
 		}
 
 	case "send_dm":
@@ -297,14 +461,15 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 			content = a.Content
 		}
 		if targetPK != "" && content != "" {
+			nick, _ := s.ident.GetProfile()
 			ts := time.Now().UnixMilli()
 			dmChannel := fmt.Sprintf("dm:%s", strings.ToLower(targetPK[:16]))
-			signPayload := []byte(fmt.Sprintf("%s:%s:%d:%s", s.ident.Nickname, dmChannel, ts, content))
+			signPayload := []byte(fmt.Sprintf("%s:%s:%d:%s", nick, dmChannel, ts, content))
 			sig := s.ident.Sign(signPayload)
 
 			msg := Message{
 				Type:        "message",
-				Author:      s.ident.Nickname,
+				Author:      nick,
 				AuthorPK:    s.ident.PubHex,
 				PeerPK:      targetPK,
 				Channel:     dmChannel,
@@ -317,7 +482,9 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 
 			s.storage.AddMessage(msg)
 			s.BroadcastJSON(msg)
-			_ = s.node.SendDirectMessage(targetPK, msg)
+			if s.node != nil {
+				_ = s.node.SendDirectMessage(targetPK, msg)
+			}
 		}
 
 	case "upload_blob":
@@ -336,27 +503,35 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 					}
 
 					attachMsg := fmt.Sprintf("[attachment:%s:%s:%d:%s]", hashHex, fn, len(data), mt)
+					nick, _ := s.ident.GetProfile()
 					ts := time.Now().UnixMilli()
-					signPayload := []byte(fmt.Sprintf("%s:%s:%d:%s", s.ident.Nickname, s.activeChannel, ts, attachMsg))
+					s.mu.RLock()
+					actCh := s.activeChannel
+					actSp := s.activeSpaceID
+					s.mu.RUnlock()
+
+					signPayload := []byte(fmt.Sprintf("%s:%s:%d:%s", nick, actCh, ts, attachMsg))
 					sig := s.ident.Sign(signPayload)
 
 					msg := Message{
 						Type:        "message",
-						Author:      s.ident.Nickname,
+						Author:      nick,
 						AuthorPK:    s.ident.PubHex,
-						Channel:     s.activeChannel,
+						Channel:     actCh,
 						Content:     attachMsg,
 						Verified:    true,
 						Signature:   hex.EncodeToString(sig),
 						TimestampMS: ts,
-						SpaceID:     s.activeSpaceID,
+						SpaceID:     actSp,
 					}
 
 					s.storage.AddMessage(msg)
 					s.BroadcastJSON(msg)
-					_ = s.node.PublishMessage(s.activeSpaceID, s.activeChannel, msg)
+					if s.node != nil {
+						_ = s.node.PublishMessage(actSp, actCh, msg)
+					}
 
-					_ = conn.WriteJSON(map[string]interface{}{
+					_ = s.sendConnJSON(conn, map[string]interface{}{
 						"type":     "blob_uploaded",
 						"hash":     hashHex,
 						"filename": fn,
@@ -370,7 +545,7 @@ func (s *Server) handleAction(conn *websocket.Conn, a IncomingAction) {
 		if a.Hash != "" {
 			data, err := s.storage.LoadBlob(a.Hash)
 			if err == nil {
-				_ = conn.WriteJSON(map[string]interface{}{
+				_ = s.sendConnJSON(conn, map[string]interface{}{
 					"type":        "blob_data",
 					"hash":        a.Hash,
 					"data_base64": base64.StdEncoding.EncodeToString(data),
@@ -446,28 +621,42 @@ func (s *Server) buildStatus() StatusResponse {
 	copy(spacesCopy, s.spaces)
 	vConn := s.voiceConnected
 	vCh := s.voiceChannel
+	ident := s.ident
 	s.mu.RUnlock()
 
-	peers := s.node.GetConnectedPeersList()
-	externalAddrs := s.node.GetExternalMultiaddrs()
-
-	extEndpoint := ""
-	if len(externalAddrs) > 0 {
-		extEndpoint = externalAddrs[0]
+	var peers []PeerInfo
+	var extEndpoint string
+	var udpPort int
+	if s.node != nil {
+		peers = s.node.GetConnectedPeersList()
+		externalAddrs := s.node.GetExternalMultiaddrs()
+		if len(externalAddrs) > 0 {
+			extEndpoint = externalAddrs[0]
+		}
+		udpPort = s.node.listenPort
+	}
+	if peers == nil {
+		peers = []PeerInfo{}
 	}
 
+	nick, status := ident.GetProfile()
+
+	spacePart := activeSpace
+	if spacePart == "" {
+		spacePart = "direct"
+	}
 	inviteURI := fmt.Sprintf("wex://join/%s?peer=%s&pk=%s&name=%s",
-		activeSpace, extEndpoint, s.ident.PubHex, "WexSpace")
+		spacePart, extEndpoint, ident.PubHex, "WexSpace")
 
 	return StatusResponse{
 		Type: "status",
 		Identity: IdentityInfo{
-			Nickname:         s.ident.Nickname,
-			Status:           s.ident.Status,
-			PublicKey:        s.ident.PubHex,
-			X25519Key:        s.ident.XPubHex,
-			PeerID:           s.ident.peerID.String(),
-			UDPPort:          s.node.listenPort,
+			Nickname:         nick,
+			Status:           status,
+			PublicKey:        ident.PubHex,
+			X25519Key:        ident.XPubHex,
+			PeerID:           ident.peerID.String(),
+			UDPPort:          udpPort,
 			DHTContacts:      len(peers),
 			OfflineShards:    0,
 			ExternalEndpoint: extEndpoint,
@@ -492,9 +681,19 @@ func (s *Server) BroadcastJSON(v interface{}) {
 	}
 
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	type target struct {
+		conn *websocket.Conn
+		mu   *sync.Mutex
+	}
+	targets := make([]target, 0, len(s.clients))
+	for conn, mu := range s.clients {
+		targets = append(targets, target{conn: conn, mu: mu})
+	}
+	s.mu.RUnlock()
 
-	for conn := range s.clients {
-		_ = conn.WriteMessage(websocket.TextMessage, data)
+	for _, t := range targets {
+		t.mu.Lock()
+		_ = t.conn.WriteMessage(websocket.TextMessage, data)
+		t.mu.Unlock()
 	}
 }

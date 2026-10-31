@@ -27,7 +27,7 @@ func TestP2PEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("storage A: %v", err)
 	}
-	nodeA, err := NewP2PNode(ctx, identA, storeA, 19101, false, nil)
+	nodeA, err := NewP2PNode(ctx, identA, storeA, 0, false, nil)
 	if err != nil {
 		t.Fatalf("node A: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestP2PEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("storage B: %v", err)
 	}
-	nodeB, err := NewP2PNode(ctx, identB, storeB, 29101, false, nil)
+	nodeB, err := NewP2PNode(ctx, identB, storeB, 0, false, nil)
 	if err != nil {
 		t.Fatalf("node B: %v", err)
 	}
@@ -108,12 +108,12 @@ func TestDirectMessageEndToEnd(t *testing.T) {
 
 	identA, _ := LoadOrCreateIdentity(dirA, "Alice")
 	storeA, _ := NewStorage(dirA)
-	nodeA, _ := NewP2PNode(ctx, identA, storeA, 19201, false, nil)
+	nodeA, _ := NewP2PNode(ctx, identA, storeA, 0, false, nil)
 	defer nodeA.Close()
 
 	identB, _ := LoadOrCreateIdentity(dirB, "Bob")
 	storeB, _ := NewStorage(dirB)
-	nodeB, _ := NewP2PNode(ctx, identB, storeB, 29201, false, nil)
+	nodeB, _ := NewP2PNode(ctx, identB, storeB, 0, false, nil)
 	defer nodeB.Close()
 
 	// Connect B to A

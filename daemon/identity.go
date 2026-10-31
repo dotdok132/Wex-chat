@@ -172,6 +172,12 @@ func (id *Identity) SetProfile(nick, status, dataDir string) {
 	_ = id.Save(dataDir)
 }
 
+func (id *Identity) GetProfile() (nick, status string) {
+	id.mu.RLock()
+	defer id.mu.RUnlock()
+	return id.Nickname, id.Status
+}
+
 func VerifySignature(pubKeyHex, sigHex string, msg []byte) bool {
 	pub, err := hex.DecodeString(pubKeyHex)
 	if err != nil || len(pub) != 32 {

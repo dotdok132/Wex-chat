@@ -68,6 +68,53 @@ static void serve_html_file(int fd) {
     if (buffer) free(buffer);
 }
 
+static void serve_static_file(int fd, const char *path, const char *content_type) {
+    char *buffer = NULL;
+    size_t length = 0;
+    FILE *f = fopen(path, "rb");
+    if (!f && strncmp(path, "../", 3) != 0) {
+        char alt_path[256];
+        snprintf(alt_path, sizeof(alt_path), "../%s", path);
+        f = fopen(alt_path, "rb");
+    }
+
+    if (f) {
+        fseek(f, 0, SEEK_END);
+        long sz = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        if (sz > 0) {
+            length = (size_t)sz;
+            buffer = (char *)malloc(length + 1);
+            if (buffer) {
+                size_t rd = fread(buffer, 1, length, f);
+                buffer[rd] = '\0';
+            }
+        }
+        fclose(f);
+    }
+
+    if (!buffer) {
+        const char *nf = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        ssize_t w = write(fd, nf, strlen(nf));
+        (void)w;
+        return;
+    }
+
+    char header[512];
+    snprintf(header, sizeof(header),
+             "HTTP/1.1 200 OK\r\n"
+             "Content-Type: %s\r\n"
+             "Content-Length: %zu\r\n"
+             "Connection: close\r\n\r\n", content_type, length);
+
+    ssize_t h = write(fd, header, strlen(header));
+    (void)h;
+    ssize_t b = write(fd, buffer, length);
+    (void)b;
+
+    free(buffer);
+}
+
 static void set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags >= 0) {
@@ -1110,7 +1157,13 @@ static bool perform_handshake(int fd, const char *req, size_t req_len) {
 
     if (!key_start) {
         if (strstr(req, "GET ") == req) {
-            serve_html_file(fd);
+            if (strstr(req, "GET /qr_engine.js") == req) {
+                serve_static_file(fd, "web/qr_engine.js", "application/javascript; charset=UTF-8");
+            } else if (strstr(req, "GET /wex_app.js") == req) {
+                serve_static_file(fd, "web/wex_app.js", "application/javascript; charset=UTF-8");
+            } else {
+                serve_html_file(fd);
+            }
         }
         return false;
     }
